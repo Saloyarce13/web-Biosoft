@@ -216,14 +216,6 @@ export function ReportsAnalytics() {
               axisLine={{ stroke: '#666' }}
             />
             <YAxis 
-              yAxisId="left" 
-              tick={{ fill: '#666' }}
-              tickLine={{ stroke: '#666' }}
-              axisLine={{ stroke: '#666' }}
-            />
-            <YAxis 
-              yAxisId="right" 
-              orientation="right" 
               tick={{ fill: '#666' }}
               tickLine={{ stroke: '#666' }}
               axisLine={{ stroke: '#666' }}
@@ -238,7 +230,6 @@ export function ReportsAnalytics() {
             />
             <Legend />
             <Line 
-              yAxisId="left" 
               type="monotone" 
               dataKey="ventas" 
               stroke={CHART_COLORS.primary} 
@@ -248,21 +239,6 @@ export function ReportsAnalytics() {
               activeDot={{ 
                 r: 8, 
                 fill: CHART_COLORS.primary,
-                stroke: 'white',
-                strokeWidth: 2
-              }}
-            />
-            <Line 
-              yAxisId="right" 
-              type="monotone" 
-              dataKey="transacciones" 
-              stroke={CHART_COLORS.secondary} 
-              name="Transacciones"
-              strokeWidth={4}
-              dot={{ fill: CHART_COLORS.secondary, strokeWidth: 2, r: 5 }}
-              activeDot={{ 
-                r: 8, 
-                fill: CHART_COLORS.secondary,
                 stroke: 'white',
                 strokeWidth: 2
               }}

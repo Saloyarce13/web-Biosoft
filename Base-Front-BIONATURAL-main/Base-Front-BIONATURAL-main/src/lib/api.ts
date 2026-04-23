@@ -453,3 +453,20 @@ export const getTransactions = async (params?: { type?: string; limit?: number }
   const qs = query.toString();
   return apiFetch<any[]>(`/transactions${qs ? `?${qs}` : ''}`);
 };
+
+// Upload API (Cloudinary)
+export const uploadProductImage = async (file: File): Promise<string> => {
+  const token = localStorage.getItem('authToken');
+  const formData = new FormData();
+  formData.append('image', file);
+
+  const res = await fetch(`${(import.meta.env.VITE_API_BASE_URL as string || 'http://localhost:3000/api')}/upload/product-image`, {
+    method: 'POST',
+    headers: token ? { Authorization: `Bearer ${token}` } : {},
+    body: formData,
+  });
+
+  const json = await res.json();
+  if (!json.success) throw new Error(json.message || 'Error al subir imagen');
+  return json.data.url as string;
+};

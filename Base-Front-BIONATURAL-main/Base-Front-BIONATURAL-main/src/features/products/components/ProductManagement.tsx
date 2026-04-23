@@ -15,7 +15,7 @@ import { ImageWithFallback } from '../../../components/figma/ImageWithFallback';
 import { toast } from 'sonner';
 import { usePersistedState, STORAGE_KEYS, generateId, getCurrentDate, formatCOP } from '../../../shared/utils/storage';
 import { isItemInactive, getInactiveItemClassName, getInactiveItemDisabledMessage, getStatusBadgeVariant, filterActiveItems } from '../../../shared/utils/inactiveStateValidation';
-import { getProducts, createProduct, updateProduct, updateProductStock, deleteProduct, getCategories, getProviders } from '../../../lib/api';
+import { getProducts, createProduct, updateProduct, updateProductStock, deleteProduct, getCategories, getProviders, uploadProductImage } from '../../../lib/api';
 import {
   Package,
   Plus,
@@ -235,6 +235,7 @@ export function ProductManagement({
   // Estado para imágenes
   const [imageFile, setImageFile] = useState<File | null>(null);
   const [imagePreview, setImagePreview] = useState<string>('');
+  const [uploadingImage, setUploadingImage] = useState(false);
   const [technicalSheetFile, setTechnicalSheetFile] = useState<File | null>(null);
   const [technicalSheetPreview, setTechnicalSheetPreview] = useState<string>('');
 
@@ -324,19 +325,33 @@ export function ProductManagement({
     }
   };
 
-  // Manejar imagen principal
-  const handleImageChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+  // Manejar imagen principal — sube a Cloudinary
+  const handleImageChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
-    if (file) {
-      if (file.size > 2 * 1024 * 1024) {
-        toast.error('La imagen no puede superar 2MB');
-        e.target.value = '';
-        return;
-      }
-      setImageFile(file);
-      const reader = new FileReader();
-      reader.onload = () => { setImagePreview(reader.result as string); };
-      reader.readAsDataURL(file);
+    if (!file) return;
+    if (file.size > 5 * 1024 * 1024) {
+      toast.error('La imagen no puede superar 5MB');
+      e.target.value = '';
+      return;
+    }
+    // Preview local inmediato
+    const reader = new FileReader();
+    reader.onload = () => setImagePreview(reader.result as string);
+    reader.readAsDataURL(file);
+    setImageFile(file);
+
+    // Subir a Cloudinary
+    try {
+      setUploadingImage(true);
+      const url = await uploadProductImage(file);
+      setImagePreview(url); // reemplaza el base64 con la URL real
+      toast.success('Imagen subida correctamente');
+    } catch {
+      toast.error('Error al subir la imagen a Cloudinary');
+      setImagePreview('');
+      setImageFile(null);
+    } finally {
+      setUploadingImage(false);
     }
   };
 
@@ -791,11 +806,11 @@ export function ProductManagement({
                   )}
                 </div>
                 <div className="flex-1 space-y-1.5">
-                  <input type="file" accept="image/*" onChange={handleImageChange} className="hidden" id="image-upload" />
-                  <Label htmlFor="image-upload" className="cursor-pointer">
+                  <input type="file" accept="image/*" onChange={handleImageChange} className="hidden" id="image-upload" disabled={uploadingImage} />
+                  <Label htmlFor="image-upload" className={uploadingImage ? 'cursor-wait' : 'cursor-pointer'}>
                     <div className="flex items-center justify-center gap-2 h-8 px-3 rounded-md border border-input bg-background text-xs shadow-sm hover:bg-accent transition-colors">
                       <Upload className="h-3 w-3" />
-                      {imagePreview ? 'Cambiar' : 'Subir imagen'}
+                      {uploadingImage ? 'Subiendo...' : imagePreview ? 'Cambiar' : 'Subir imagen'}
                     </div>
                   </Label>
                   {imagePreview && (
