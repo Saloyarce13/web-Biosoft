@@ -27,6 +27,7 @@ app.use('/api/purchases',  require('./routes/purchase.routes'));
 app.use('/api/sales',       require('./routes/sale.routes'));
 app.use('/api/stats',       require('./routes/stats.routes'));
 app.use('/api/transactions', require('./routes/transaction.routes'));
+app.use('/api/upload',       require('./routes/upload.routes'));
 
 // ─── Ruta de salud del servidor ────────────────────────────────────────────────
 app.get('/api/health', (req, res) => {
@@ -50,7 +51,7 @@ const startServer = async () => {
   await ensureInitialData();
 
   // 3. Levantar el servidor
-  app.listen(PORT, () => {
+  app.listen(PORT, '0.0.0.0', () => {
     console.log(`🚀 Servidor corriendo en http://localhost:${PORT}`);
     console.log(`📋 Endpoints disponibles:`);
     console.log(`   POST   http://localhost:${PORT}/api/auth/register`);
