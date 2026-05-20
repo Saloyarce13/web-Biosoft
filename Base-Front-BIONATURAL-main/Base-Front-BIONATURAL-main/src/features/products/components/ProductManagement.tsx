@@ -12,6 +12,7 @@ import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, 
 import { Textarea } from '../../../components/ui/textarea';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '../../../components/ui/tabs';
 import { ImageWithFallback } from '../../../components/figma/ImageWithFallback';
+import { DataTable, Column } from '../../../shared/components/DataTable';
 import { toast } from 'sonner';
 import { usePersistedState, STORAGE_KEYS, generateId, getCurrentDate, formatCOP } from '../../../shared/utils/storage';
 import { isItemInactive, getInactiveItemClassName, getInactiveItemDisabledMessage, getStatusBadgeVariant, filterActiveItems } from '../../../shared/utils/inactiveStateValidation';
@@ -160,6 +161,9 @@ export function ProductManagement({
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
+  // Modal proveedores
+  const [providersModal, setProvidersModal] = useState<{ open: boolean; productName: string; names: string[] }>({ open: false, productName: '', names: [] });
+
   // Cargar productos, categorías y proveedores desde API
   useEffect(() => {
     const loadData = async () => {
@@ -206,12 +210,13 @@ export function ProductManagement({
   const [sortOrder, setSortOrder] = useState<'asc' | 'desc'>('asc');
   const [currentPage, setCurrentPage] = useState(1);
   const [selectedProduct, setSelectedProduct] = useState<Product | null>(null);
+  const [productToDelete, setProductToDelete] = useState<Product | null>(null);
   const [currentView, setCurrentView] = useState<'list' | 'create' | 'edit' | 'detail' | 'reports'>('list');
 
-  // Resetear página cuando cambian los filtros o búsqueda
+  // Resetear página cuando cambian los filtros
   useEffect(() => {
     setCurrentPage(1);
-  }, [searchTerm, categoryFilter, statusFilter, supplierFilter]);
+  }, [categoryFilter, statusFilter, supplierFilter]);
 
   // Estados del formulario
   const [formData, setFormData] = useState({
@@ -242,17 +247,11 @@ export function ProductManagement({
   // Filtrar y ordenar productos
   const filteredAndSortedProducts = useMemo(() => {
     let filtered = products.filter(product => {
-      const matchesSearch = product.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
-                           product.sku.toLowerCase().includes(searchTerm.toLowerCase()) ||
-                           product.category.toLowerCase().includes(searchTerm.toLowerCase()) ||
-                           product.description.toLowerCase().includes(searchTerm.toLowerCase()) ||
-                           (product.barcode && product.barcode.includes(searchTerm)) ||
-                           product.supplier.toLowerCase().includes(searchTerm.toLowerCase());
       const matchesCategory = categoryFilter === 'all' || product.category === categoryFilter;
       const matchesStatus = statusFilter === 'all' || product.status === statusFilter;
       const matchesSupplier = supplierFilter === 'all' || product.supplier === supplierFilter;
       
-      return matchesSearch && matchesCategory && matchesStatus && matchesSupplier;
+      return matchesCategory && matchesStatus && matchesSupplier;
     });
 
     // Ordenamiento
@@ -292,12 +291,9 @@ export function ProductManagement({
     });
 
     return filtered;
-  }, [products, searchTerm, categoryFilter, statusFilter, supplierFilter, sortBy, sortOrder]);
+  }, [products, categoryFilter, statusFilter, supplierFilter, sortBy, sortOrder]);
 
-  // Paginación
-  const totalPages = Math.ceil(filteredAndSortedProducts.length / ITEMS_PER_PAGE);
-  const startIndex = (currentPage - 1) * ITEMS_PER_PAGE;
-  const paginatedProducts = filteredAndSortedProducts.slice(startIndex, startIndex + ITEMS_PER_PAGE);
+
 
   // Obtener color del estado
   const getStatusColor = (status: string) => {
@@ -580,17 +576,10 @@ export function ProductManagement({
       const response = await deleteProduct(productId);
 
       if (response.success) {
-        const fresh = await getProducts(true);
-        if (fresh.success) {
-          setApiProducts(fresh.data.map((p: any) => ({
-            id: String(p.id), name: p.name, description: p.description || '',
-            price: Number(p.price), category: p.category?.name || '', categoryId: p.categoryId || p.category?.id,
-            stock: p.stock || 0, status: (p.isActive ? 'Activo' : 'Inactivo') as Product['status'], image: p.image || '',
-            technicalSheet: '', supplier: '', sku: p.sku || '', minStock: p.minStock || 5,
-            isActive: p.isActive, createdDate: p.createdAt?.split('T')[0] || '',
-            updatedDate: p.updatedAt?.split('T')[0] || '', totalSales: 0, lastSaleDate: null, cost: 0, margin: 0,
-          })));
-        }
+        // Eliminar directamente del estado local sin esperar a la API
+        setApiProducts(prev => prev.filter(p => p.id !== productId));
+        setCurrentPage(1); // resetear a página 1
+        setProductToDelete(null);
         toast.success(`Producto "${product?.name}" eliminado exitosamente`);
       }
     } catch (error) {
@@ -645,7 +634,7 @@ export function ProductManagement({
               <Package className="h-4 w-4 text-primary" />
             </div>
             <div>
-              <p className="font-semibold text-sm">{isEdit ? 'Editar Producto' : 'Registrar Producto'}</p>
+              <p className="font-semibold text-sm">{isEdit ? 'Editar Producto' : 'Nuevo Producto'}</p>
               <p className="text-xs text-muted-foreground">
                 {isEdit ? selectedProduct?.name : 'Los campos con * son obligatorios'}
               </p>
@@ -833,7 +822,7 @@ export function ProductManagement({
             {/* Botones */}
             <div className="flex gap-2 pt-1">
               <Button onClick={isEdit ? handleUpdateProduct : handleCreateProduct} className="flex-1 h-9 text-sm">
-                {isEdit ? <><Edit className="h-3.5 w-3.5 mr-1.5" />Actualizar</> : <><Plus className="h-3.5 w-3.5 mr-1.5" />Registrar</>}
+                {isEdit ? <><Edit className="h-3.5 w-3.5 mr-1.5" />Actualizar</> : <><Plus className="h-3.5 w-3.5 mr-1.5" />Guardar</>}
               </Button>
               <Button variant="outline" onClick={cancel} className="flex-1 h-9 text-sm">Cancelar</Button>
             </div>
@@ -1270,21 +1259,93 @@ export function ProductManagement({
     );
   }
 
+  const tableColumns: Column<Product>[] = [
+    {
+      header: 'Producto',
+      accessor: (product) => {
+        const isInactive = isItemInactive(product);
+        return (
+          <div className="flex items-center gap-3">
+            <div className={`w-12 h-12 rounded-lg overflow-hidden bg-muted ${isInactive ? 'opacity-50' : ''}`}>
+              {product.image ? (
+                <ImageWithFallback src={product.image} alt={product.name} className="w-full h-full object-cover" />
+              ) : (
+                <div className="w-full h-full flex items-center justify-center">
+                  <ImageIcon className="h-5 w-5 text-muted-foreground" />
+                </div>
+              )}
+            </div>
+            <div>
+              <p className={`font-medium ${isInactive ? 'text-muted-foreground' : ''}`}>{product.name}</p>
+            </div>
+          </div>
+        );
+      }
+    },
+    {
+      header: 'Código',
+      accessor: (product) => <code className="bg-muted px-2 py-1 rounded text-sm">{product.sku}</code>
+    },
+    {
+      header: 'Categoría',
+      accessor: (product) => <Badge variant="outline">{product.category}</Badge>
+    },
+    {
+      header: 'Proveedor',
+      accessor: (product) => {
+        if (!product.providerName) return <span className="text-xs text-muted-foreground">—</span>;
+        const names = product.providerName.split(', ').filter(Boolean);
+        return (
+          <div className="flex items-center gap-1">
+            <Badge variant="secondary" className="text-xs">
+              <Building2 className="h-3 w-3 mr-1" />
+              {names[0]}
+            </Badge>
+            {names.length > 1 && (
+              <Badge
+                variant="outline"
+                className="text-xs px-1.5 cursor-pointer hover:bg-accent transition-colors"
+                onClick={() => setProvidersModal({ open: true, productName: product.name, names })}
+              >
+                +{names.length - 1}
+              </Badge>
+            )}
+          </div>
+        );
+      }
+    },
+    {
+      header: 'Stock',
+      accessor: (product) => (
+        <div className="space-y-1">
+          <p className="font-medium">{product.stock} unidades</p>
+          {getStockBadge(product.stock, product.minStock)}
+        </div>
+      )
+    },
+    {
+      header: 'Estado',
+      accessor: (product) => (
+        <div className="flex items-center gap-2">
+          <Switch
+            checked={product.status === 'Activo'}
+            onCheckedChange={() => handleToggleStatus(product.id)}
+            disabled={isItemInactive(product)}
+          />
+          <span className="text-sm text-muted-foreground">{product.status}</span>
+        </div>
+      )
+    }
+  ];
+
   return (
     <div className="space-y-6">
       {/* Header con filtros y controles */}
       <div className="flex flex-col lg:flex-row gap-4 items-start lg:items-center justify-between">
         <div>
           <h2>Gestión de Productos</h2>
-          <p className="text-muted-foreground">
-            Administra el inventario y catálogo de productos
-          </p>
         </div>
         <div className="flex gap-2">
-          <Button variant="outline" onClick={() => setCurrentView('reports')}>
-            <BarChart3 className="h-4 w-4 mr-2" />
-            Reportes
-          </Button>
           <Button onClick={() => setCurrentView('create')}>
             <Plus className="h-4 w-4 mr-2" />
             Nuevo Producto
@@ -1292,68 +1353,63 @@ export function ProductManagement({
         </div>
       </div>
 
-      {/* Filtros */}
-      <Card>
-        <CardContent className="p-4">
-          <div className="grid grid-cols-1 md:grid-cols-5 gap-4">
-            <div className="relative">
-              <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 h-4 w-4 text-muted-foreground" />
-              <Input
-                placeholder="Buscar por nombre, SKU, categoría, código de barras..."
-                value={searchTerm}
-                onChange={(e) => setSearchTerm(e.target.value)}
-                className="pl-10"
-              />
-            </div>
-
+      <DataTable
+        title="Productos"
+        description={`Mostrando ${filteredAndSortedProducts.length} productos en total`}
+        data={filteredAndSortedProducts}
+        columns={tableColumns}
+        searchableKeys={['name', 'sku', 'category', 'description', 'barcode', 'supplier']}
+        searchPlaceholder="Buscar productos..."
+        itemsPerPage={ITEMS_PER_PAGE}
+        isLoading={loading}
+        onEdit={(p) => handleEditProduct(p)}
+        onDelete={(p) => setProductToDelete(p)}
+        customActions={(product) => (
+          <Button variant="ghost" size="icon" disabled={isItemInactive(product)} onClick={() => handleViewProduct(product)} title="Ver detalles" className="h-8 w-8 text-blue-600 hover:text-blue-700 hover:bg-blue-50">
+            <Eye className="w-4 h-4" />
+          </Button>
+        )}
+        extraFilters={
+          <div className="flex gap-2">
             <Select value={categoryFilter} onValueChange={setCategoryFilter}>
-              <SelectTrigger>
+              <SelectTrigger className="w-[150px] h-9">
                 <SelectValue placeholder="Categoría" />
               </SelectTrigger>
               <SelectContent>
-                <SelectItem value="all">Todas las categorías</SelectItem>
+                <SelectItem value="all">Categorías</SelectItem>
                 {categories.filter((c: any) => c.isActive).map((cat: any) => (
-                  <SelectItem key={cat.id} value={cat.name}>
-                    {cat.name}
-                  </SelectItem>
+                  <SelectItem key={cat.id} value={cat.name}>{cat.name}</SelectItem>
                 ))}
               </SelectContent>
             </Select>
-
             <Select value={statusFilter} onValueChange={setStatusFilter}>
-              <SelectTrigger>
+              <SelectTrigger className="w-[150px] h-9">
                 <SelectValue placeholder="Estado" />
               </SelectTrigger>
               <SelectContent>
-                <SelectItem value="all">Todos los estados</SelectItem>
+                <SelectItem value="all">Estados</SelectItem>
                 {PRODUCT_STATUS.map(status => (
-                  <SelectItem key={status.value} value={status.value}>
-                    {status.label}
-                  </SelectItem>
+                  <SelectItem key={status.value} value={status.value}>{status.label}</SelectItem>
                 ))}
               </SelectContent>
             </Select>
-
             <Select value={supplierFilter} onValueChange={setSupplierFilter}>
-              <SelectTrigger>
+              <SelectTrigger className="w-[150px] h-9">
                 <SelectValue placeholder="Proveedor" />
               </SelectTrigger>
               <SelectContent>
-                <SelectItem value="all">Todos los proveedores</SelectItem>
+                <SelectItem value="all">Proveedores</SelectItem>
                 {providers.filter((p: any) => p.isActive).map((p: any) => (
-                  <SelectItem key={p.id} value={p.name}>
-                    {p.name}
-                  </SelectItem>
+                  <SelectItem key={p.id} value={p.name}>{p.name}</SelectItem>
                 ))}
               </SelectContent>
             </Select>
-
             <Select value={`${sortBy}-${sortOrder}`} onValueChange={(value) => {
               const [field, order] = value.split('-');
               setSortBy(field as any);
               setSortOrder(order as 'asc' | 'desc');
             }}>
-              <SelectTrigger>
+              <SelectTrigger className="w-[150px] h-9">
                 <SelectValue placeholder="Ordenar por" />
               </SelectTrigger>
               <SelectContent>
@@ -1366,167 +1422,46 @@ export function ProductManagement({
               </SelectContent>
             </Select>
           </div>
-        </CardContent>
-      </Card>
+        }
+      />
 
-      {/* Tabla de productos */}
-      <Card>
-        <CardHeader>
-          <CardTitle className="flex items-center gap-2">
-            <Package className="h-5 w-5" />
-            Productos ({filteredAndSortedProducts.length})
-          </CardTitle>
-        </CardHeader>
-        <CardContent>
-          <div className="overflow-x-auto">
-            <Table>
-              <TableHeader>
-                <TableRow>
-                  <TableHead>Producto</TableHead>
-                  <TableHead>Código</TableHead>
-                  <TableHead>Categoría</TableHead>
-                  <TableHead>Proveedor</TableHead>
-                  <TableHead>Stock</TableHead>
-                  <TableHead>Estado</TableHead>
-                  <TableHead>Acciones</TableHead>
-                </TableRow>
-              </TableHeader>
-              <TableBody>
-                {paginatedProducts.map((product) => {
-                  const isInactive = isItemInactive(product);
-                  const inactiveClass = getInactiveItemClassName({ disabled: isInactive });
-                  
-                  return (
-                  <TableRow key={product.id} className={inactiveClass} title={isInactive ? 'Este producto está inactivo' : ''}>
-                    <TableCell>
-                      <div className="flex items-center gap-3">
-                        <div className="w-12 h-12 rounded-lg overflow-hidden bg-muted">
-                          {product.image ? (
-                            <ImageWithFallback
-                              src={product.image}
-                              alt={product.name}
-                              className="w-full h-full object-cover"
-                            />
-                          ) : (
-                            <div className="w-full h-full flex items-center justify-center">
-                              <ImageIcon className="h-5 w-5 text-muted-foreground" />
-                            </div>
-                          )}
-                        </div>
-                        <div>
-                          <p className="font-medium">{product.name}</p>
-                        </div>
-                      </div>
-                    </TableCell>
-                    <TableCell>
-                      <code className="bg-muted px-2 py-1 rounded text-sm">
-                        {product.sku}
-                      </code>
-                    </TableCell>
-                    <TableCell>
-                      <Badge variant="outline">
-                        {product.category}
-                      </Badge>
-                    </TableCell>
-                    <TableCell>
-                      {product.providerName ? (
-                        <div className="flex flex-wrap gap-1">
-                          {(product.providerName.split(', ')).map((name: string, i: number) => (
-                            <Badge key={i} variant="secondary" className="text-xs">
-                              <Building2 className="h-3 w-3 mr-1" />
-                              {name}
-                            </Badge>
-                          ))}
-                        </div>
-                      ) : (
-                        <span className="text-xs text-muted-foreground">—</span>
-                      )}
-                    </TableCell>
-                    <TableCell>
-                      <div className="space-y-1">
-                        <p className="font-medium">{product.stock} unidades</p>
-                        {getStockBadge(product.stock, product.minStock)}
-                      </div>
-                    </TableCell>
-                    <TableCell>
-                      <div className="flex items-center gap-2">
-                        <Switch
-                          checked={product.status === 'Activo'}
-                          onCheckedChange={() => handleToggleStatus(product.id)}
-                        />
-                        <span className="text-sm text-muted-foreground">
-                          {product.status}
-                        </span>
-                      </div>
-                    </TableCell>
-                    <TableCell>
-                      <div className="flex items-center gap-2">
-                        <Button variant="ghost" size="sm" disabled={isInactive} onClick={() => handleViewProduct(product)} title={isInactive ? 'Este producto está inactivo' : 'Ver detalles'}>
-                          <Eye className="h-4 w-4" />
-                        </Button>
-                        <Button variant="ghost" size="sm" disabled={isInactive} onClick={() => handleEditProduct(product)} title={isInactive ? 'Este producto está inactivo' : 'Editar'}>
-                          <Edit className="h-4 w-4" />
-                        </Button>
-                        <AlertDialog>
-                          <AlertDialogTrigger asChild>
-                            <Button variant="ghost" size="sm" disabled={isInactive} className="text-red-600 hover:text-red-700" title={isInactive ? 'Este producto está inactivo' : 'Eliminar'}>
-                              <Trash2 className="h-4 w-4" />
-                            </Button>
-                          </AlertDialogTrigger>
-                          <AlertDialogContent>
-                            <AlertDialogHeader>
-                              <AlertDialogTitle>¿Eliminar producto?</AlertDialogTitle>
-                              <AlertDialogDescription>
-                                Esta acción no se puede deshacer. Se eliminará permanentemente "{product.name}" del inventario.
-                              </AlertDialogDescription>
-                            </AlertDialogHeader>
-                            <AlertDialogFooter>
-                              <AlertDialogCancel>Cancelar</AlertDialogCancel>
-                              <AlertDialogAction onClick={() => handleDeleteProductLocal(product.id)} className="bg-red-600 hover:bg-red-700">
-                                Eliminar
-                              </AlertDialogAction>
-                            </AlertDialogFooter>
-                          </AlertDialogContent>
-                        </AlertDialog>
-                      </div>
-                    </TableCell>
-                  </TableRow>
-                  );
-                })}
-              </TableBody>
-            </Table>
+      <AlertDialog open={!!productToDelete} onOpenChange={(open) => !open && setProductToDelete(null)}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>¿Eliminar producto?</AlertDialogTitle>
+            <AlertDialogDescription>
+              Esta acción no se puede deshacer. Se eliminará permanentemente "{productToDelete?.name}" del inventario.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Cancelar</AlertDialogCancel>
+            <AlertDialogAction onClick={() => productToDelete && handleDeleteProductLocal(productToDelete.id)} className="bg-red-600 hover:bg-red-700">
+              Eliminar
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+
+      {/* Modal proveedores */}
+      <Dialog open={providersModal.open} onOpenChange={open => setProvidersModal(p => ({ ...p, open }))}>
+        <DialogContent className="max-w-sm">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2 text-base">
+              <Building2 className="h-4 w-4 text-primary" />
+              Proveedores — {providersModal.productName}
+            </DialogTitle>
+            <DialogDescription className="sr-only">Lista de proveedores del producto</DialogDescription>
+          </DialogHeader>
+          <div className="space-y-2 py-2">
+            {providersModal.names.map((name, i) => (
+              <div key={i} className="flex items-center gap-2 px-3 py-2 rounded-lg bg-muted/50">
+                <Building2 className="h-4 w-4 text-muted-foreground shrink-0" />
+                <span className="text-sm font-medium">{name}</span>
+              </div>
+            ))}
           </div>
-
-          {/* Paginación */}
-          {totalPages > 1 && (
-            <div className="flex items-center justify-between mt-4">
-              <div className="text-sm text-muted-foreground">
-                Página {currentPage} de {totalPages}
-              </div>
-              <div className="flex gap-2">
-                <Button
-                  variant="outline"
-                  size="sm"
-                  onClick={() => setCurrentPage(prev => Math.max(1, prev - 1))}
-                  disabled={currentPage === 1}
-                >
-                  <ChevronLeft className="h-4 w-4" />
-                  Anterior
-                </Button>
-                <Button
-                  variant="outline"
-                  size="sm"
-                  onClick={() => setCurrentPage(prev => Math.min(totalPages, prev + 1))}
-                  disabled={currentPage === totalPages}
-                >
-                  Siguiente
-                  <ChevronRight className="h-4 w-4" />
-                </Button>
-              </div>
-            </div>
-          )}
-        </CardContent>
-      </Card>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }

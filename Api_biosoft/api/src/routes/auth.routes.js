@@ -1,23 +1,22 @@
 // src/routes/auth.routes.js
-const router = require('express').Router();
-const {
-  register,
-  verifyEmail,
-  login,
-  me,
-  passwordResetRequest,
-  passwordResetVerifyCode,
-  passwordResetConfirm,
-} = require('../controllers/auth.controller');
-const { verifyToken } = require('../middlewares/auth.middleware');
+const express = require('express');
+const router = express.Router();
+const authController = require('../controllers/auth.controller');
+const { authenticateToken } = require('../middleware/auth');
 
-router.post('/register', register);
-router.post('/verify-email', verifyEmail);
-router.post('/login', login);
-router.get('/me', verifyToken, me);
+// Rutas públicas
+router.post('/register', authController.register);
+router.post('/login', authController.login);
+router.post('/demo-login', authController.demoLogin);
 
-router.post('/password-reset/request', passwordResetRequest);
-router.post('/password-reset/verify-code', passwordResetVerifyCode);
-router.post('/password-reset/confirm', passwordResetConfirm);
+// Recuperación de contraseña
+router.post('/password-reset/request', authController.passwordResetRequest);
+router.post('/password-reset/verify-code', authController.passwordResetVerifyCode);
+router.post('/password-reset/confirm', authController.passwordResetConfirm);
+
+// Rutas protegidas (requieren autenticación)
+router.get('/me', authenticateToken, authController.getProfile);
+router.put('/profile', authenticateToken, authController.updateProfile);
+router.post('/change-password', authenticateToken, authController.changePassword);
 
 module.exports = router;

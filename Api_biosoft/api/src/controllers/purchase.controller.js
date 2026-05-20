@@ -1,6 +1,7 @@
 const { z } = require('zod');
 const prisma = require('../lib/prisma');
 const { validate } = require('../lib/validate');
+const { checkAndCancelLowStockOrders } = require('../lib/stockChecker');
 
 const PurchaseStatus = {
   REGISTERED: 'REGISTERED',
@@ -20,9 +21,10 @@ const toNumber = (value) => {
   return typeof value === 'number' ? value : Number(value);
 };
 
+// El frontend envía unitPrice; internamente lo mapeamos a unitCost (nombre del campo en BD)
 const itemSchema = z.object({
   productId: z.coerce.number().int().positive(),
-  quantity: z.coerce.number().int().positive(),
+  quantity:  z.coerce.number().int().positive(),
   unitPrice: z
     .union([z.number().positive(), z.string().regex(/^[0-9]+(\.[0-9]{1,2})?$/)])
     .optional(),
@@ -31,9 +33,9 @@ const itemSchema = z.object({
 const createPurchaseSchema = z.object({
   providerId: z.coerce.number().int().positive(),
   employeeId: z.coerce.number().int().positive().optional().nullable(),
-  notes: z.string().max(500).optional().nullable(),
+  notes:  z.string().max(500).optional().nullable(),
   status: z.enum([PurchaseStatus.REGISTERED, PurchaseStatus.COMPLETED, PurchaseStatus.CANCELLED, PurchaseStatus.ANNULED]).optional(),
-  items: z.array(itemSchema).min(1),
+  items:  z.array(itemSchema).min(1),
 });
 
 const addItemsSchema = z.object({
@@ -58,6 +60,17 @@ const computeTotal = (items) => {
   return moneyRound2(items.reduce((sum, it) => sum + toNumber(it.lineTotal), 0));
 };
 
+// Normaliza los items del request: resuelve unitCost y lineTotal
+const normalizeItems = (items, productById) => {
+  return items.map((it) => {
+    const product = productById.get(it.productId);
+    // El frontend puede enviar unitPrice; lo usamos como unitCost en la BD
+    const unitCost = it.unitPrice !== undefined ? Number(it.unitPrice) : toNumber(product?.price ?? 0);
+    const lineTotal = moneyRound2(unitCost * it.quantity);
+    return { productId: it.productId, quantity: it.quantity, unitCost: moneyRound2(unitCost), lineTotal };
+  });
+};
+
 const create = async (req, res) => {
   try {
     const parsed = validate(createPurchaseSchema, req.body);
@@ -72,9 +85,8 @@ const create = async (req, res) => {
       return res.status(400).json({ success: false, message: 'El proveedor no existe o está inactivo' });
     }
 
-    let employee = null;
     if (employeeId) {
-      employee = await prisma.employee.findUnique({ where: { id: employeeId }, select: { id: true, isActive: true } });
+      const employee = await prisma.employee.findUnique({ where: { id: employeeId }, select: { id: true, isActive: true } });
       if (!employee || !employee.isActive) {
         return res.status(400).json({ success: false, message: 'El empleado no existe o está inactivo' });
       }
@@ -89,15 +101,8 @@ const create = async (req, res) => {
       return res.status(400).json({ success: false, message: 'Uno o más productos no existen o están inactivos' });
     }
 
-    // Construimos items con precios por producto si no vienen unitPrice
     const productById = new Map(products.map((p) => [p.id, p]));
-    const normalizedItems = items.map((it) => {
-      const product = productById.get(it.productId);
-      const unitPrice = it.unitPrice !== undefined ? Number(it.unitPrice) : toNumber(product.price);
-      const lineTotal = moneyRound2(unitPrice * it.quantity);
-      return { ...it, unitPrice: moneyRound2(unitPrice), lineTotal };
-    });
-
+    const normalizedItems = normalizeItems(items, productById);
     const totalPrice = computeTotal(normalizedItems);
 
     const created = await prisma.$transaction(async (tx) => {
@@ -117,32 +122,30 @@ const create = async (req, res) => {
       await tx.purchaseItem.createMany({
         data: normalizedItems.map((it) => ({
           purchaseId: purchase.id,
-          productId: it.productId,
-          quantity: it.quantity,
-          unitPrice: it.unitPrice,
-          lineTotal: it.lineTotal,
+          productId:  it.productId,
+          quantity:   it.quantity,
+          unitCost:   it.unitCost,   // ← campo correcto en BD
+          lineTotal:  it.lineTotal,
         })),
       });
 
       if (purchaseStatus === PurchaseStatus.COMPLETED) {
-        // Aplica stock IN
-        // Para compras no necesitamos validar stock negativo; solo sumamos
         await Promise.all(
           normalizedItems.map((it) =>
             tx.product.update({
               where: { id: it.productId },
-              data: { stock: { increment: it.quantity } },
+              data:  { stock: { increment: it.quantity } },
             }),
           ),
         );
 
         await tx.transaction.createMany({
           data: normalizedItems.map((it) => ({
-            type: 'STOCK_IN',
-            amount: it.lineTotal,
+            type:       'STOCK_IN',
+            amount:     it.lineTotal,
             userId,
             purchaseId: purchase.id,
-            metadata: { productId: it.productId, quantity: it.quantity },
+            metadata:   { productId: it.productId, quantity: it.quantity },
           })),
         });
       }
@@ -169,7 +172,7 @@ const list = async (req, res) => {
   try {
     const { status, providerId } = req.query;
     const where = {};
-    if (status) where.status = status;
+    if (status)     where.status     = status;
     if (providerId) where.providerId = Number(providerId);
 
     const purchases = await prisma.purchase.findMany({
@@ -194,7 +197,7 @@ const getOne = async (req, res) => {
         employee: true,
         items: {
           include: { product: { include: { category: true } } },
-          orderBy: { createdAt: 'asc' },
+          orderBy: { id: 'asc' },
         },
       },
     });
@@ -231,12 +234,7 @@ const addItems = async (req, res) => {
     }
 
     const productById = new Map(products.map((p) => [p.id, p]));
-    const normalizedItems = items.map((it) => {
-      const product = productById.get(it.productId);
-      const unitPrice = it.unitPrice !== undefined ? Number(it.unitPrice) : toNumber(product.price);
-      const lineTotal = moneyRound2(unitPrice * it.quantity);
-      return { ...it, unitPrice: moneyRound2(unitPrice), lineTotal };
-    });
+    const normalizedItems = normalizeItems(items, productById);
 
     await prisma.$transaction(async (tx) => {
       for (const it of normalizedItems) {
@@ -246,18 +244,18 @@ const addItems = async (req, res) => {
 
         if (existing) {
           const newQuantity = existing.quantity + it.quantity;
-          const newLineTotal = moneyRound2(it.unitPrice * newQuantity);
+          const newLineTotal = moneyRound2(it.unitCost * newQuantity);
           await tx.purchaseItem.update({
             where: { purchaseId_productId: { purchaseId, productId: it.productId } },
-            data: { quantity: newQuantity, unitPrice: it.unitPrice, lineTotal: newLineTotal },
+            data:  { quantity: newQuantity, unitCost: it.unitCost, lineTotal: newLineTotal },
           });
         } else {
           await tx.purchaseItem.create({
             data: {
               purchaseId,
               productId: it.productId,
-              quantity: it.quantity,
-              unitPrice: it.unitPrice,
+              quantity:  it.quantity,
+              unitCost:  it.unitCost,
               lineTotal: it.lineTotal,
             },
           });
@@ -267,8 +265,6 @@ const addItems = async (req, res) => {
       const allItems = await tx.purchaseItem.findMany({ where: { purchaseId }, select: { lineTotal: true } });
       const newTotal = computeTotal(allItems);
       await tx.purchase.update({ where: { id: purchaseId }, data: { totalPrice: newTotal } });
-
-      // (Opcional) podrías registrar transacciones por edición; por ahora solo stock en status COMPLETED
     });
 
     const purchaseFull = await prisma.purchase.findUnique({
@@ -299,10 +295,7 @@ const removeItems = async (req, res) => {
     }
 
     await prisma.$transaction(async (tx) => {
-      await tx.purchaseItem.deleteMany({
-        where: { purchaseId, productId: { in: productIds } },
-      });
-
+      await tx.purchaseItem.deleteMany({ where: { purchaseId, productId: { in: productIds } } });
       const allItems = await tx.purchaseItem.findMany({ where: { purchaseId }, select: { lineTotal: true } });
       const newTotal = computeTotal(allItems);
       await tx.purchase.update({ where: { id: purchaseId }, data: { totalPrice: newTotal } });
@@ -340,7 +333,6 @@ const changeStatus = async (req, res) => {
 
     const current = purchase.status;
 
-    // Reglas de transición — una orden COMPLETED no se puede anular
     const allowed =
       (current === PurchaseStatus.REGISTERED && targetStatus === PurchaseStatus.COMPLETED) ||
       (current === PurchaseStatus.REGISTERED && [PurchaseStatus.CANCELLED, PurchaseStatus.ANNULED].includes(targetStatus));
@@ -353,36 +345,31 @@ const changeStatus = async (req, res) => {
       where: { purchaseId },
       select: { productId: true, quantity: true, lineTotal: true },
     });
-
     if (items.length === 0) return res.status(400).json({ success: false, message: 'La compra no tiene productos' });
 
     await prisma.$transaction(async (tx) => {
       if (current === PurchaseStatus.REGISTERED && targetStatus === PurchaseStatus.COMPLETED) {
-        // Sumar stock
         await Promise.all(
           items.map((it) =>
             tx.product.update({
               where: { id: it.productId },
-              data: { stock: { increment: it.quantity } },
+              data:  { stock: { increment: it.quantity } },
             }),
           ),
         );
 
         await tx.transaction.createMany({
           data: items.map((it) => ({
-            type: 'STOCK_IN',
-            amount: it.lineTotal,
+            type:       'STOCK_IN',
+            amount:     it.lineTotal,
             userId,
             purchaseId,
-            metadata: { productId: it.productId, quantity: it.quantity },
+            metadata:   { productId: it.productId, quantity: it.quantity },
           })),
         });
       }
 
-      await tx.purchase.update({
-        where: { id: purchaseId },
-        data: { status: targetStatus },
-      });
+      await tx.purchase.update({ where: { id: purchaseId }, data: { status: targetStatus } });
     });
 
     const purchaseFull = await prisma.purchase.findUnique({
@@ -394,9 +381,12 @@ const changeStatus = async (req, res) => {
       },
     });
 
+    if (targetStatus === PurchaseStatus.COMPLETED) {
+      checkAndCancelLowStockOrders().catch(err => console.warn('[STOCK CHECKER]', err?.message));
+    }
+
     return res.status(200).json({ success: true, message: 'Estado de compra actualizado', data: purchaseFull });
   } catch (error) {
-    // Errores controlados (p.ej. stock insuficiente) deberían ser 400
     return res.status(400).json({ success: false, message: error.message });
   }
 };
@@ -414,4 +404,3 @@ const pdf = async (req, res) => {
 };
 
 module.exports = { create, list, getOne, addItems, removeItems, changeStatus, pdf };
-

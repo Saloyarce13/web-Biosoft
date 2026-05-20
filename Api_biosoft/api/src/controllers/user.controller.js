@@ -2,12 +2,19 @@ const bcrypt = require('bcryptjs');
 const { z } = require('zod');
 const prisma = require('../lib/prisma');
 const { validate } = require('../lib/validate');
+const { validateEmailExists } = require('../lib/validateEmail');
 
 const updateUserSchema = z.object({
-  name: z.string().min(2).max(100).optional(),
-  email: z.string().email().optional(),
-  roleId: z.coerce.number().int().positive().optional(),
-  isActive: z.coerce.boolean().optional(),
+  name:           z.string().min(2).max(100).optional(),
+  email:          z.string().email().optional(),
+  roleId:         z.coerce.number().int().positive().optional(),
+  isActive:       z.coerce.boolean().optional(),
+  documentType:   z.enum(['CC', 'CE', 'PAS', 'NIT', 'TI', 'PA'], { message: 'Tipo de documento inválido' }).optional().nullable(),
+  documentNumber: z.string()
+    .regex(/^\d{8,15}$/, 'El número de documento debe tener entre 8 y 15 dígitos numéricos')
+    .optional()
+    .nullable(),
+  phone:          z.string().regex(/^\+?\d{10,20}$/, 'El teléfono debe tener entre 10 y 20 dígitos (puede incluir +)').max(20).optional().nullable(),
 });
 
 const changePasswordSchema = z.object({
@@ -24,6 +31,13 @@ const create = async (req, res) => {
     }
     const existing = await prisma.user.findUnique({ where: { email } });
     if (existing) return res.status(409).json({ success: false, message: 'El email ya está registrado' });
+
+    // Validar que el dominio del email existe
+    const emailCheck = await validateEmailExists(email);
+    if (!emailCheck.valid) {
+      return res.status(400).json({ success: false, message: emailCheck.message });
+    }
+
     const role = await prisma.role.findUnique({ where: { id: Number(roleId) } });
     if (!role) return res.status(400).json({ success: false, message: 'El rol no existe' });
     if (!role.isActive) return res.status(409).json({ success: false, message: `El rol "${role.name}" está desactivado y no puede ser asignado` });
@@ -33,7 +47,7 @@ const create = async (req, res) => {
 
     const user = await prisma.$transaction(async (tx) => {
       const newUser = await tx.user.create({
-        data: { name, email, passwordHash, roleId: Number(roleId), isActive: true, emailVerified: true },
+        data: { name, email, password: passwordHash, roleId: Number(roleId), isActive: true, emailVerified: true },
         select: { id: true, name: true, email: true, isActive: true, role: { select: { id: true, name: true } } },
       });
 
@@ -93,8 +107,9 @@ const getConsolidated = async (req, res) => {
     const [users, employees, clients, providers] = await Promise.all([
       prisma.user.findMany({
         orderBy: { createdAt: 'desc' },
-        where: { role: { isActive: true } }, // solo usuarios con rol activo
-        select: { id: true, name: true, email: true, isActive: true, role: { select: { name: true } }, createdAt: true },
+        where: { role: { isActive: true } },
+        // Incluir phone directamente de users
+        select: { id: true, name: true, email: true, phone: true, isActive: true, role: { select: { name: true } }, createdAt: true },
       }),
       prisma.employee.findMany({
         orderBy: { createdAt: 'desc' },
@@ -106,7 +121,7 @@ const getConsolidated = async (req, res) => {
       }),
       prisma.provider.findMany({
         orderBy: { createdAt: 'desc' },
-        select: { id: true, name: true, email: true, phone: true, documentType: true, documentNumber: true, isActive: true, createdAt: true },
+        select: { id: true, name: true, email: true, phone: true, isActive: true, createdAt: true },
       }),
     ]);
 
@@ -114,21 +129,30 @@ const getConsolidated = async (req, res) => {
     const empByEmail = new Map(employees.map(e => [e.email, e]));
     const cliByEmail = new Map(clients.map(c => [c.email, c]));
 
-    // Emails de usuarios con rol activo (para filtrar empleados)
+    // Emails de usuarios con rol activo
     const activeRoleUserEmails = new Set(users.map(u => u.email).filter(Boolean));
 
-    // Filtrar empleados: solo los cuyo usuario tiene rol activo (o sin usuario)
-    const filteredEmployees = employees.filter(e => !e.email || activeRoleUserEmails.has(e.email));
+    // Empleados SIN usuario en el sistema (para no duplicar)
+    const filteredEmployees = employees.filter(e => e.email && !activeRoleUserEmails.has(e.email));
+
+    // Clientes SIN usuario en el sistema (para no duplicar)
+    const filteredClients = clients.filter(c => !c.email || !activeRoleUserEmails.has(c.email));
+
+    const EMPLOYEE_ROLES = ['administrador', 'vendedor', 'bodega', 'contador', 'empleado'];
 
     const result = [
       ...users.map(u => {
-        // Buscar documento en Employee o Client por email
+        // Buscar documento y teléfono en Employee o Client por email
         const emp = u.email ? empByEmail.get(u.email) : null;
         const cli = u.email ? cliByEmail.get(u.email) : null;
         const docSource = emp || cli;
-        // Solo usar phone si parece un número (no un email)
-        const rawPhone = docSource?.phone || '';
+
+        // Teléfono: prioridad → employees/clients → users directamente
+        const rawPhone = docSource?.phone || u.phone || '';
         const phone = rawPhone && !rawPhone.includes('@') ? rawPhone : '';
+        // Determinar origen: si el rol es de empleado, mostrar como Empleado
+        const roleName = (u.role?.name || '').toLowerCase();
+        const origin = EMPLOYEE_ROLES.includes(roleName) ? 'Empleado' : 'Usuario';
         return {
           id: `user-${u.id}`,
           name: u.name,
@@ -137,7 +161,7 @@ const getConsolidated = async (req, res) => {
           documentType: docSource?.documentType || '',
           documentNumber: docSource?.documentNumber || '',
           role: u.role?.name || 'Sin rol',
-          origin: 'Usuario',
+          origin,
           isActive: u.isActive,
           createdAt: u.createdAt,
         };
@@ -154,7 +178,7 @@ const getConsolidated = async (req, res) => {
         isActive: e.isActive,
         createdAt: e.createdAt,
       })),
-      ...clients.map(c => ({
+      ...filteredClients.map(c => ({
         id: `cli-${c.id}`,
         name: c.name,
         email: c.email || '',
@@ -171,8 +195,8 @@ const getConsolidated = async (req, res) => {
         name: p.name,
         email: p.email || '',
         phone: p.phone || '',
-        documentType: p.documentType || '',
-        documentNumber: p.documentNumber || '',
+        documentType: '',
+        documentNumber: '',
         role: 'Proveedor',
         origin: 'Proveedor',
         isActive: p.isActive,
@@ -240,7 +264,7 @@ const update = async (req, res) => {
     const parsed = validate(updateUserSchema, req.body);
     if (!parsed.ok) return res.status(400).json({ success: false, message: parsed.error });
 
-    const { name, email, roleId, isActive } = parsed.data;
+    const { name, email, roleId, isActive, documentType, documentNumber, phone } = parsed.data;
 
     if (Object.keys(parsed.data).length === 0) {
       return res.status(400).json({ success: false, message: 'No se enviaron campos para actualizar' });
@@ -284,6 +308,17 @@ const update = async (req, res) => {
       const effectiveName = name || user.name;
       const roleName = newRole.name.toLowerCase();
 
+      // Sincronizar documento/teléfono en Employee o Client si existen
+      const docUpdate = {};
+      if (documentType  !== undefined) docUpdate.documentType  = documentType;
+      if (documentNumber !== undefined) docUpdate.documentNumber = documentNumber;
+      if (phone          !== undefined) docUpdate.phone          = phone;
+
+      if (Object.keys(docUpdate).length > 0) {
+        await tx.employee.updateMany({ where: { email: effectiveEmail }, data: docUpdate });
+        await tx.client.updateMany({ where: { email: effectiveEmail }, data: docUpdate });
+      }
+
       // Sincronizar estado en Client si existe
       if (isActive !== undefined) {
         await tx.client.updateMany({ where: { email: effectiveEmail }, data: { isActive } });
@@ -304,7 +339,7 @@ const update = async (req, res) => {
         const existingEmp = await tx.employee.findUnique({ where: { email: effectiveEmail } });
         if (!existingEmp) {
           await tx.employee.create({
-            data: { fullName: effectiveName, email: effectiveEmail, position: newRole.name, isActive: true, password: user.passwordHash },
+            data: { fullName: effectiveName, email: effectiveEmail, position: newRole.name, isActive: true, password: user.password },
           });
         }
       }
@@ -376,15 +411,15 @@ const changePassword = async (req, res) => {
 
     const user = await prisma.user.findUnique({
       where: { id: Number(req.params.id) },
-      select: { id: true, passwordHash: true },
+      select: { id: true, password: true },
     });
     if (!user) return res.status(404).json({ success: false, message: 'Usuario no encontrado' });
 
-    const isValid = await bcrypt.compare(currentPassword, user.passwordHash);
+    const isValid = await bcrypt.compare(currentPassword, user.password);
     if (!isValid) return res.status(401).json({ success: false, message: 'Contraseña actual incorrecta' });
 
     const hashedNew = await bcrypt.hash(newPassword, 10);
-    await prisma.user.update({ where: { id: Number(req.params.id) }, data: { passwordHash: hashedNew } });
+    await prisma.user.update({ where: { id: Number(req.params.id) }, data: { password: hashedNew } });
 
     return res.status(200).json({ success: true, message: 'Contraseña actualizada correctamente' });
   } catch (error) {
@@ -406,7 +441,7 @@ const resetPassword = async (req, res) => {
     const passwordHash = await bcrypt.hash(newPassword, 10);
     await prisma.user.update({
       where: { id: Number(req.params.id) },
-      data: { passwordHash, isActive: true, emailVerified: true },
+      data: { password: passwordHash, isActive: true, emailVerified: true },
     });
 
     return res.status(200).json({ success: true, message: 'Contraseña reseteada correctamente' });
@@ -420,14 +455,33 @@ const remove = async (req, res) => {
   try {
     const user = await prisma.user.findUnique({
       where: { id: Number(req.params.id) },
-      select: { id: true, name: true },
+      select: { id: true, name: true, email: true },
     });
     if (!user) return res.status(404).json({ success: false, message: 'Usuario no encontrado' });
+
+    // Verificar si tiene ventas o compras asociadas
+    const [salesCount, purchasesCount] = await Promise.all([
+      prisma.sale.count({ where: { createdByUserId: user.id } }),
+      prisma.purchase.count({ where: { createdByUserId: user.id } }),
+    ]);
+
+    if (salesCount > 0 || purchasesCount > 0) {
+      return res.status(409).json({
+        success: false,
+        message: `No se puede eliminar a "${user.name}" porque tiene ${salesCount} venta(s) y ${purchasesCount} compra(s) registradas. Puedes desactivarlo en su lugar.`,
+      });
+    }
 
     await prisma.user.delete({ where: { id: Number(req.params.id) } });
 
     return res.status(200).json({ success: true, message: `Usuario "${user.name}" eliminado correctamente` });
   } catch (error) {
+    if (error.code === 'P2003' || error.message?.includes('foreign key')) {
+      return res.status(409).json({
+        success: false,
+        message: 'No se puede eliminar este usuario porque tiene registros asociados. Desactívalo en su lugar.',
+      });
+    }
     return res.status(500).json({ success: false, message: error.message });
   }
 };

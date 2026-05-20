@@ -2,11 +2,15 @@ const { z } = require('zod');
 const bcrypt = require('bcryptjs');
 const prisma = require('../lib/prisma');
 const { validate } = require('../lib/validate');
+const { validateEmailExists } = require('../lib/validateEmail');
 
 // Regex de validaciones
-const PHONE_REGEX = /^\d+$/;                                      // solo dígitos, sin espacios
-const DOC_REGEX   = /^\d{1,15}$/;                                 // 1-15 dígitos numéricos
+const PHONE_REGEX = /^\+?\d{10,20}$/; // 10-20 dígitos, permite '+' al inicio
+const DOC_REGEX   = /^\d{8,15}$/;                                 // 8-15 dígitos numéricos
 const PASSWORD_REGEX = /^(?=.*[A-Z])(?=.*\d)(?=.*[^A-Za-z0-9]).{8,}$/; // mayúscula + número + especial
+
+// Tipos de documento válidos (alineados con frontend y otros controladores)
+const VALID_DOC_TYPES = ['CC', 'CE', 'PAS', 'NIT', 'TI', 'PA'];
 
 const isAdult = (val) => {
   const birth = new Date(val);
@@ -19,8 +23,8 @@ const isAdult = (val) => {
 const createEmployeeSchema = z.object({
   fullName:       z.string().min(2).max(120),
   email:          z.string().email(),
-  phone:          z.string().regex(PHONE_REGEX, 'El teléfono solo acepta números sin espacios').max(30),
-  documentType:   z.enum(['CC', 'CE', 'PAS', 'NIT'], { message: 'Tipo de documento inválido' }),
+  phone:          z.string().regex(PHONE_REGEX, 'El teléfono debe tener entre 10 y 20 dígitos (puede incluir +)').max(30),
+  documentType:   z.enum(['CC', 'CE', 'PAS', 'NIT', 'TI', 'PA'], { message: 'Tipo de documento inválido' }),
   documentNumber: z.string()
     .min(1, 'El número de documento es obligatorio')
     .max(15, 'Máximo 15 caracteres')
@@ -38,10 +42,10 @@ const createEmployeeSchema = z.object({
 const updateEmployeeSchema = z.object({
   fullName:       z.string().min(2).max(120).optional(),
   email:          z.string().email().optional(),
-  phone:          z.string().regex(PHONE_REGEX, 'El teléfono solo acepta números sin espacios').max(30).optional().nullable(),
-  documentType:   z.enum(['CC', 'CE', 'PAS', 'NIT']).optional().nullable(),
+  phone:          z.string().regex(PHONE_REGEX, 'El teléfono debe tener entre 10 y 20 dígitos (puede incluir +)').max(30).optional().nullable(),
+  documentType:   z.enum(['CC', 'CE', 'PAS', 'NIT', 'TI', 'PA']).optional().nullable(),
   documentNumber: z.string()
-    .min(1).max(15)
+    .min(8).max(15)
     .regex(/^\d+$/, 'Solo se aceptan caracteres numéricos')
     .optional().nullable(),
   address:        z.string().max(250).optional().nullable(),
@@ -57,26 +61,48 @@ const updateEmployeeSchema = z.object({
 
 const getAll = async (req, res) => {
   try {
-    // Obtener empleados cuyo usuario asociado tiene rol activo
-    // (o empleados sin usuario asociado, que se muestran siempre)
+    // 1. Empleados reales de la tabla employees
     const employees = await prisma.employee.findMany({
       orderBy: { createdAt: 'desc' },
     });
 
-    // Filtrar: si el empleado tiene email y usuario, verificar que el rol esté activo
-    const activeRoleEmails = new Set(
-      (await prisma.user.findMany({
-        where: { role: { isActive: true } },
-        select: { email: true },
-      })).map(u => u.email)
-    );
+    // 2. Usuarios con roles de empleado que NO tienen registro en employees
+    //    (para mantener consistencia si hay desincronización)
+    const EMPLOYEE_ROLES = ['Administrador', 'Vendedor', 'Bodega', 'Contador', 'Empleado'];
+    const employeeEmails = new Set(employees.map(e => e.email).filter(Boolean));
 
-    const filtered = employees.filter(e => {
-      if (!e.email) return true; // sin usuario asociado, mostrar siempre
-      return activeRoleEmails.has(e.email);
+    const usersWithEmployeeRole = await prisma.user.findMany({
+      where: {
+        role: { name: { in: EMPLOYEE_ROLES } },
+        isActive: true,
+        email: { notIn: [...employeeEmails] },
+      },
+      include: { role: true },
     });
 
-    return res.status(200).json({ success: true, total: filtered.length, data: filtered });
+    // Crear registros faltantes en employees automáticamente
+    for (const user of usersWithEmployeeRole) {
+      if (!user.email) continue;
+      await prisma.employee.create({
+        data: {
+          fullName: user.name,
+          email:    user.email,
+          phone:    user.phone    || undefined,
+          address:  user.address  || undefined,
+          position: user.role.name,
+          password: user.password,
+          isActive: user.isActive,
+          createdAt: user.createdAt,
+        },
+      }).catch(() => {}); // ignorar si ya existe por race condition
+    }
+
+    // Volver a leer para incluir los recién creados
+    const allEmployees = await prisma.employee.findMany({
+      orderBy: { createdAt: 'desc' },
+    });
+
+    return res.status(200).json({ success: true, total: allEmployees.length, data: allEmployees });
   } catch (error) {
     return res.status(500).json({ success: false, message: error.message });
   }
@@ -104,6 +130,12 @@ const create = async (req, res) => {
       if (existing) return res.status(409).json({ success: false, message: 'Este email de empleado ya existe' });
       const existingUser = await prisma.user.findUnique({ where: { email } });
       if (existingUser) return res.status(409).json({ success: false, message: 'Ya existe un usuario con este email' });
+
+      // Validar que el dominio del email existe
+      const emailCheck = await validateEmailExists(email);
+      if (!emailCheck.valid) {
+        return res.status(400).json({ success: false, message: emailCheck.message });
+      }
     }
 
     // Validar documento duplicado
@@ -148,7 +180,7 @@ const create = async (req, res) => {
           data: {
             name: fullName,
             email,
-            passwordHash,
+            password: passwordHash,
             roleId: role.id,
             isActive: true,
             emailVerified: true,
@@ -217,7 +249,7 @@ const update = async (req, res) => {
         const userUpdate = {};
         if (fullName) userUpdate.name = fullName;
         if (isActive !== undefined) userUpdate.isActive = isActive;
-        if (newPasswordHash) userUpdate.passwordHash = newPasswordHash;
+        if (newPasswordHash) userUpdate.password = newPasswordHash;
         // Si cambió el cargo, actualizar el rol del usuario
         if (position) {
           const positionLower = position.toLowerCase();

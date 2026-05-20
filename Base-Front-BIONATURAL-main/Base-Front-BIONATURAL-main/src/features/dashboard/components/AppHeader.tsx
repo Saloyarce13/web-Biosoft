@@ -1,12 +1,12 @@
 import React from 'react';
 import { SidebarTrigger } from '../../../components/ui/sidebar';
-import { Leaf, ShoppingCart, ChevronDown } from 'lucide-react';
+import { Leaf, ChevronDown } from 'lucide-react';
 
 interface AppHeaderProps {
-  user: { name: string; email: string; role: string; };
-  onLogout: () => void;
-  cartItemsCount: number;
-  onCartOpen: () => void;
+  user: { name: string; email: string; role: string; permissions?: string[] };
+  onLogout?: () => void;
+  cartItemsCount?: number;
+  onCartOpen?: () => void;
   onUserSidebarOpen: () => void;
 }
 
@@ -21,7 +21,7 @@ function getInitials(name: string) {
   return name.split(' ').map(n => n[0]).join('').toUpperCase().slice(0, 2);
 }
 
-export function AppHeader({ user, cartItemsCount, onCartOpen, onUserSidebarOpen }: AppHeaderProps) {
+export function AppHeader({ user, onUserSidebarOpen }: AppHeaderProps) {
   const roleStyle = ROLE_STYLES[user.role] || { bg: '#F4F4F2', color: '#737370', border: '#E5E5E2' };
 
   return (
@@ -49,28 +49,8 @@ export function AppHeader({ user, cartItemsCount, onCartOpen, onUserSidebarOpen 
           </div>
         </div>
 
-        {/* Derecha: carrito + usuario */}
+        {/* Derecha: usuario */}
         <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-
-          {/* Carrito */}
-          <button
-            onClick={onCartOpen}
-            style={{ position: 'relative', width: 40, height: 40, borderRadius: 10, border: '1px solid #E5E5E2', backgroundColor: 'white', display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer', transition: 'background 0.15s' }}
-            onMouseEnter={e => (e.currentTarget.style.backgroundColor = '#F4F4F2')}
-            onMouseLeave={e => (e.currentTarget.style.backgroundColor = 'white')}
-          >
-            <ShoppingCart style={{ width: 16, height: 16, color: '#737370' }} />
-            {cartItemsCount > 0 && (
-              <span style={{ position: 'absolute', top: -4, right: -4, width: 18, height: 18, borderRadius: '50%', backgroundColor: '#3A7D44', color: 'white', fontSize: 10, fontWeight: 700, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-                {cartItemsCount > 9 ? '9+' : cartItemsCount}
-              </span>
-            )}
-          </button>
-
-          {/* Separador */}
-          <div style={{ width: 1, height: 24, backgroundColor: '#E5E5E2' }} />
-
-          {/* Usuario */}
           <button
             onClick={onUserSidebarOpen}
             style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '6px 12px', borderRadius: 10, border: '1px solid #E5E5E2', backgroundColor: 'white', cursor: 'pointer', transition: 'background 0.15s' }}

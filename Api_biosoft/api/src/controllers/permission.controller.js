@@ -29,7 +29,7 @@ const getOne = async (req, res) => {
   try {
     const permission = await prisma.permission.findUnique({
       where: { id: Number(req.params.id) },
-      include: { rolePermissions: { include: { role: true } } },
+      include: { roles: { include: { role: true } } },
     });
     if (!permission) return res.status(404).json({ success: false, message: 'Permiso no encontrado' });
     return res.status(200).json({ success: true, data: permission });

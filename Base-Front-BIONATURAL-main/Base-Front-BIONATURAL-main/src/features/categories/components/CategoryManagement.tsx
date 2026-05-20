@@ -5,12 +5,12 @@ import { Badge } from '../../../components/ui/badge';
 import { Input } from '../../../components/ui/input';
 import { Label } from '../../../components/ui/label';
 import { Textarea } from '../../../components/ui/textarea';
-import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '../../../components/ui/table';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '../../../components/ui/select';
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '../../../components/ui/dialog';
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle, AlertDialogTrigger } from '../../../components/ui/alert-dialog';
 import { Tooltip, TooltipContent, TooltipTrigger } from '../../../components/ui/tooltip';
 import { Separator } from '../../../components/ui/separator';
+import { DataTable, Column } from '../../../shared/components/DataTable';
 import { toast } from 'sonner';
 import {
   getCategories, createCategory, updateCategory,
@@ -82,9 +82,7 @@ function CategoryFormModal({ open, onClose, title, name, setName, desc, setDesc,
 export function CategoryManagement() {
   const [categories, setCategories] = useState<ApiCategory[]>([]);
   const [loading, setLoading] = useState(true);
-  const [searchTerm, setSearchTerm] = useState('');
   const [statusFilter, setStatusFilter] = useState('all');
-  const [currentPage, setCurrentPage] = useState(1);
 
   // Modal crear
   const [isCreateOpen, setIsCreateOpen] = useState(false);
@@ -127,13 +125,9 @@ export function CategoryManagement() {
   useEffect(() => { load(); }, []);
 
   const filtered = categories.filter(c => {
-    const matchSearch = c.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
-      (c.description || '').toLowerCase().includes(searchTerm.toLowerCase());
     const matchStatus = statusFilter === 'all' || (statusFilter === 'active' ? c.isActive : !c.isActive);
-    return matchSearch && matchStatus;
+    return matchStatus;
   });
-  const totalPages = Math.ceil(filtered.length / ITEMS_PER_PAGE);
-  const paginated = filtered.slice((currentPage - 1) * ITEMS_PER_PAGE, currentPage * ITEMS_PER_PAGE);
 
   // ── Crear ──────────────────────────────────────────────────────────────────
   const handleCreate = async () => {
@@ -191,12 +185,89 @@ export function CategoryManagement() {
     try {
       const res = await deleteCategory(String(c.id));
       if (res.success) {
-        setCurrentPage(1);
         await load();
         toast.success(`Categoría "${c.name}" eliminada`);
       }
     } catch (err: any) { toast.error(err?.message || 'Error al eliminar categoría'); }
   };
+
+  const columns: Column<ApiCategory>[] = [
+    {
+      header: 'Categoría',
+      accessor: (cat) => (
+        <div className={`flex items-center gap-3 ${!cat.isActive ? 'opacity-60' : ''}`}>
+          <div className={`flex h-10 w-10 items-center justify-center rounded-xl shrink-0 ${cat.isActive ? 'bg-primary/10' : 'bg-muted'}`}>
+            <Tag className={`h-5 w-5 ${cat.isActive ? 'text-primary' : 'text-muted-foreground'}`} />
+          </div>
+          <div className="flex-1 min-w-0">
+            <span className="font-semibold text-sm">{cat.name}</span>
+            {cat.description && (
+              <p className="text-xs text-muted-foreground mt-0.5 truncate max-w-[200px]">{cat.description}</p>
+            )}
+          </div>
+        </div>
+      )
+    },
+    {
+      header: 'Estado',
+      accessor: (cat) => (
+        <Badge variant={cat.isActive ? 'default' : 'secondary'} className="text-xs">
+          {cat.isActive ? 'Activa' : 'Inactiva'}
+        </Badge>
+      )
+    },
+    {
+      header: 'Productos',
+      accessor: (cat) => (
+        <div className="flex items-center gap-1.5 shrink-0 bg-muted/60 rounded-full px-3 py-1.5 w-fit">
+          <Package className="h-3.5 w-3.5 text-muted-foreground" />
+          <span className="text-xs font-semibold text-foreground">{cat.productCount}</span>
+        </div>
+      )
+    }
+  ];
+
+  const customActions = (cat: ApiCategory) => (
+    <>
+      <Tooltip>
+        <TooltipTrigger asChild>
+          <Button variant="ghost" size="icon" className="h-8 w-8 text-muted-foreground hover:text-foreground"
+            onClick={() => { setDetailCat(cat); setCatProducts([]); loadCatProducts(cat.id); setIsDetailOpen(true); }}>
+            <Eye className="h-4 w-4" />
+          </Button>
+        </TooltipTrigger>
+        <TooltipContent>Ver detalle</TooltipContent>
+      </Tooltip>
+      <Tooltip>
+        <TooltipTrigger asChild>
+          <Button variant="ghost" size="icon" className="h-8 w-8" onClick={() => handleToggle(cat)}>
+            {cat.isActive
+              ? <ToggleRight className="h-5 w-5 text-green-600" />
+              : <ToggleLeft className="h-5 w-5 text-muted-foreground" />}
+          </Button>
+        </TooltipTrigger>
+        <TooltipContent>{cat.isActive ? 'Desactivar' : 'Activar'}</TooltipContent>
+      </Tooltip>
+    </>
+  );
+
+  const extraFilters = (
+    <div className="flex items-center gap-2">
+      <Button variant="outline" size="sm" onClick={load} disabled={loading} className="h-9 px-3 border-gray-200">
+        <RefreshCw className={`h-4 w-4 ${loading ? 'animate-spin text-gray-400' : 'text-gray-500'}`} />
+      </Button>
+      <Select value={statusFilter} onValueChange={setStatusFilter}>
+        <SelectTrigger className="w-[140px] h-9 bg-white border-gray-200 text-sm">
+          <SelectValue placeholder="Estado" />
+        </SelectTrigger>
+        <SelectContent>
+          <SelectItem value="all">Todas</SelectItem>
+          <SelectItem value="active">Activas</SelectItem>
+          <SelectItem value="inactive">Inactivas</SelectItem>
+        </SelectContent>
+      </Select>
+    </div>
+  );
 
   return (
     <div className="space-y-5">
@@ -207,9 +278,7 @@ export function CategoryManagement() {
           <h1 className="text-xl font-semibold flex items-center gap-2">
             <Tag className="h-5 w-5 text-primary" /> Gestión de Categorías
           </h1>
-          <p className="text-sm text-muted-foreground mt-0.5">
-            Administra las categorías de productos
-          </p>
+          
         </div>
         <div className="flex items-center gap-2">
           <Button variant="outline" size="sm" onClick={load} disabled={loading}>
@@ -221,181 +290,22 @@ export function CategoryManagement() {
         </div>
       </div>
 
-      {/* Buscador + filtro estado */}
-      <div className="flex gap-3">
-        <div className="relative flex-1">
-          <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground pointer-events-none" />
-          <Input placeholder="Buscar por nombre o descripción..."
-            value={searchTerm}
-            onChange={e => { setSearchTerm(e.target.value); setCurrentPage(1); }}
-            className="pl-10" />
-        </div>
-        <Select value={statusFilter} onValueChange={v => { setStatusFilter(v); setCurrentPage(1); }}>
-          <SelectTrigger className="w-36"><SelectValue placeholder="Estado" /></SelectTrigger>
-          <SelectContent>
-            <SelectItem value="all">Todos</SelectItem>
-            <SelectItem value="active">Activas</SelectItem>
-            <SelectItem value="inactive">Inactivas</SelectItem>
-          </SelectContent>
-        </Select>
-      </div>
-
-      {/* Tabla */}
-      <Card>
-        <CardContent className="p-0">
-          <div className="flex items-center justify-between px-4 py-3 border-b">
-            <span className="text-sm font-medium">Categorías</span>
-            <span className="text-xs text-muted-foreground">{filtered.length} categoría{filtered.length !== 1 ? 's' : ''}</span>
-          </div>
-
-          {loading ? (
-            <div className="flex items-center justify-center py-14 gap-2 text-muted-foreground">
-              <RefreshCw className="h-5 w-5 animate-spin" /><span className="text-sm">Cargando...</span>
-            </div>
-          ) : (
-            <Table>
-              <TableHeader>
-                <TableRow className="hover:bg-transparent">
-                  <TableHead className="pl-4">Categoría</TableHead>
-                  <TableHead>Productos</TableHead>
-                  <TableHead>Estado</TableHead>
-                  <TableHead className="text-right pr-4">Acciones</TableHead>
-                </TableRow>
-              </TableHeader>
-              <TableBody>
-                {paginated.length === 0 ? (
-                  <TableRow>
-                    <TableCell colSpan={4} className="text-center py-10 text-muted-foreground text-sm">
-                      No se encontraron categorías
-                    </TableCell>
-                  </TableRow>
-                ) : paginated.map(cat => (
-                  <TableRow key={cat.id} className={!cat.isActive ? 'opacity-60' : ''}>
-                    <TableCell className="pl-4">
-                      <div className="flex items-center gap-2.5">
-                        <div className={`flex h-8 w-8 items-center justify-center rounded-full shrink-0 ${cat.isActive ? 'bg-primary/10' : 'bg-muted'}`}>
-                          <Tag className={`h-4 w-4 ${cat.isActive ? 'text-primary' : 'text-muted-foreground'}`} />
-                        </div>
-                        <div>
-                          <div className="flex items-center gap-2">
-                            <p className="font-medium text-sm">{cat.name}</p>
-                            <Badge variant={cat.isActive ? 'default' : 'secondary'} className="text-xs px-1.5 py-0">
-                              {cat.isActive ? 'Activa' : 'Inactiva'}
-                            </Badge>
-                          </div>
-                          {cat.description && (
-                            <p className="text-xs text-muted-foreground line-clamp-1">{cat.description}</p>
-                          )}
-                        </div>
-                      </div>
-                    </TableCell>
-                    <TableCell>
-                      <Badge variant="outline" className="gap-1 text-xs">
-                        <Package className="h-3 w-3" />{cat.productCount} producto{cat.productCount !== 1 ? 's' : ''}
-                      </Badge>
-                    </TableCell>
-                    <TableCell>
-                      <span className={`text-sm font-medium ${cat.isActive ? 'text-green-600' : 'text-muted-foreground'}`}>
-                        {cat.isActive ? 'Activa' : 'Inactiva'}
-                      </span>
-                    </TableCell>
-                    <TableCell className="text-right pr-4">
-                      <div className="flex items-center justify-end gap-1">
-                        {/* Ver detalle */}
-                        <Tooltip>
-                          <TooltipTrigger asChild>
-                            <Button variant="ghost" size="icon" className="h-8 w-8"
-                              onClick={() => {
-                                setDetailCat(cat);
-                                setCatProducts([]);
-                                loadCatProducts(cat.id);
-                                setIsDetailOpen(true);
-                              }}>
-                              <Eye className="h-4 w-4 text-muted-foreground" />
-                            </Button>
-                          </TooltipTrigger>
-                          <TooltipContent>Ver detalle</TooltipContent>
-                        </Tooltip>
-                        {/* Editar — bloqueado si inactiva */}
-                        <Tooltip>
-                          <TooltipTrigger asChild>
-                            <span>
-                              <Button variant="ghost" size="icon" className="h-8 w-8"
-                                onClick={() => openEdit(cat)} disabled={!cat.isActive}>
-                                <Edit className={`h-4 w-4 ${cat.isActive ? 'text-muted-foreground' : 'text-muted-foreground/30'}`} />
-                              </Button>
-                            </span>
-                          </TooltipTrigger>
-                          <TooltipContent>{cat.isActive ? 'Editar' : 'Categoría inactiva'}</TooltipContent>
-                        </Tooltip>
-                        {/* Toggle */}
-                        <Tooltip>
-                          <TooltipTrigger asChild>
-                            <Button variant="ghost" size="icon" className="h-8 w-8" onClick={() => handleToggle(cat)}>
-                              {cat.isActive
-                                ? <ToggleRight className="h-4 w-4 text-green-600" />
-                                : <ToggleLeft className="h-4 w-4 text-muted-foreground" />}
-                            </Button>
-                          </TooltipTrigger>
-                          <TooltipContent>{cat.isActive ? 'Desactivar' : 'Activar'}</TooltipContent>
-                        </Tooltip>
-                        {/* Eliminar — bloqueado si tiene productos o está inactiva */}
-                        <AlertDialog>
-                          <Tooltip>
-                            <TooltipTrigger asChild>
-                              <span>
-                                <AlertDialogTrigger asChild>
-                                  <Button variant="ghost" size="icon" className="h-8 w-8"
-                                    disabled={cat.productCount > 0 || !cat.isActive}>
-                                    <Trash2 className={`h-4 w-4 ${cat.productCount === 0 && cat.isActive ? 'text-destructive' : 'text-muted-foreground/30'}`} />
-                                  </Button>
-                                </AlertDialogTrigger>
-                              </span>
-                            </TooltipTrigger>
-                            <TooltipContent>
-                              {cat.productCount > 0 ? 'Tiene productos asignados' : !cat.isActive ? 'Categoría inactiva' : 'Eliminar'}
-                            </TooltipContent>
-                          </Tooltip>
-                          <AlertDialogContent>
-                            <AlertDialogHeader>
-                              <AlertDialogTitle>¿Eliminar categoría?</AlertDialogTitle>
-                              <AlertDialogDescription>
-                                Se eliminará permanentemente <strong>{cat.name}</strong>. Esta acción no se puede deshacer.
-                              </AlertDialogDescription>
-                            </AlertDialogHeader>
-                            <AlertDialogFooter>
-                              <AlertDialogCancel>Cancelar</AlertDialogCancel>
-                              <AlertDialogAction onClick={() => handleDelete(cat)}
-                                className="bg-destructive text-destructive-foreground hover:bg-destructive/90">
-                                Eliminar
-                              </AlertDialogAction>
-                            </AlertDialogFooter>
-                          </AlertDialogContent>
-                        </AlertDialog>
-                      </div>
-                    </TableCell>
-                  </TableRow>
-                ))}
-              </TableBody>
-            </Table>
-          )}
-
-          {totalPages > 1 && (
-            <div className="flex items-center justify-between px-4 py-3 border-t">
-              <p className="text-xs text-muted-foreground">Página {currentPage} de {totalPages}</p>
-              <div className="flex gap-1">
-                <Button variant="outline" size="sm" onClick={() => setCurrentPage(p => Math.max(1, p - 1))} disabled={currentPage === 1}>
-                  <ChevronLeft className="h-4 w-4" />
-                </Button>
-                <Button variant="outline" size="sm" onClick={() => setCurrentPage(p => Math.min(totalPages, p + 1))} disabled={currentPage === totalPages}>
-                  <ChevronRight className="h-4 w-4" />
-                </Button>
-              </div>
-            </div>
-          )}
-        </CardContent>
-      </Card>
-
+      {/* Tabla de Categorías */}
+      <DataTable
+        title="Categorías del sistema"
+        description="Administra las categorías de productos de la tienda Bionatural."
+        data={filtered}
+        columns={columns}
+        searchPlaceholder="Buscar por nombre..."
+        searchableKeys={['name', 'description']}
+        onAdd={() => { setCreateName(''); setCreateDesc(''); setIsCreateOpen(true); }}
+        onEdit={(cat) => openEdit(cat)}
+        onDelete={handleDelete}
+        customActions={customActions}
+        extraFilters={extraFilters}
+        itemsPerPage={ITEMS_PER_PAGE}
+        isLoading={loading}
+      />
       {/* Modal Crear */}
       <CategoryFormModal
         open={isCreateOpen} onClose={() => setIsCreateOpen(false)} title="Nueva Categoría"

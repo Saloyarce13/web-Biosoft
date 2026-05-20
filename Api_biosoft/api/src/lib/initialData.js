@@ -1,101 +1,153 @@
-const bcrypt = require('bcryptjs');
+// src/lib/initialData.js
 const prisma = require('./prisma');
-
-const DEFAULT_ADMIN_EMAIL = 'admin@biosoft.local';
-const DEFAULT_ADMIN_PASSWORD = 'Admin123!';
-
-const INITIAL_PERMISSIONS = [
-  { name: 'roles.view',        description: 'Ver roles del sistema' },
-  { name: 'roles.manage',      description: 'Crear, editar y eliminar roles' },
-  { name: 'users.view',        description: 'Ver usuarios' },
-  { name: 'users.manage',      description: 'Crear, editar y eliminar usuarios' },
-  { name: 'employees.view',    description: 'Ver empleados' },
-  { name: 'employees.manage',  description: 'Crear, editar y eliminar empleados' },
-  { name: 'products.view',     description: 'Ver productos' },
-  { name: 'products.manage',   description: 'Crear, editar y eliminar productos' },
-  { name: 'categories.view',   description: 'Ver categorías' },
-  { name: 'categories.manage', description: 'Crear, editar y eliminar categorías' },
-  { name: 'providers.view',    description: 'Ver proveedores' },
-  { name: 'providers.manage',  description: 'Crear, editar y eliminar proveedores' },
-  { name: 'clients.view',      description: 'Ver clientes' },
-  { name: 'clients.manage',    description: 'Crear, editar y eliminar clientes' },
-  { name: 'purchases.view',    description: 'Ver compras' },
-  { name: 'purchases.manage',  description: 'Crear y gestionar compras' },
-  { name: 'sales.view',        description: 'Ver ventas' },
-  { name: 'sales.manage',      description: 'Crear y gestionar ventas' },
-  { name: 'reports.view',      description: 'Ver reportes y estadísticas' },
-];
-
-const ensureRole = async (name, description) => {
-  return prisma.role.upsert({
-    where: { name },
-    update: { description },
-    create: { name, description },
-  });
-};
-
-const ensureAdminUser = async (adminRoleId) => {
-  const email = DEFAULT_ADMIN_EMAIL;
-  const existingUser = await prisma.user.findUnique({ where: { email } });
-  if (existingUser) return existingUser;
-
-  const passwordHash = await bcrypt.hash(DEFAULT_ADMIN_PASSWORD, 10);
-  return prisma.user.create({
-    data: {
-      name: 'Administrador',
-      email,
-      passwordHash,
-      roleId: adminRoleId,
-      isActive: true,
-      emailVerified: true,
-    },
-  });
-};
-
-const ensurePermissions = async () => {
-  const permissions = [];
-  for (const perm of INITIAL_PERMISSIONS) {
-    const p = await prisma.permission.upsert({
-      where: { name: perm.name },
-      update: { description: perm.description },
-      create: perm,
-    });
-    permissions.push(p);
-  }
-  return permissions;
-};
-
-const ensureAdminHasAllPermissions = async (adminRoleId, permissions) => {
-  for (const perm of permissions) {
-    await prisma.rolePermission.upsert({
-      where: { roleId_permissionId: { roleId: adminRoleId, permissionId: perm.id } },
-      update: {},
-      create: { roleId: adminRoleId, permissionId: perm.id },
-    });
-  }
-};
+const bcrypt = require('bcryptjs');
 
 const ensureInitialData = async () => {
-  const adminRole = await ensureRole('administrador', 'Rol administrador completo');
-  await ensureRole('user', 'Rol de usuario estándar');
-  // Roles de empleados — el admin asigna permisos desde el módulo de Roles
-  await ensureRole('vendedor', 'Vendedor de tienda');
-  await ensureRole('bodega', 'Encargado de bodega e inventario');
-  await ensureRole('contador', 'Contador y reportes financieros');
-  await ensureAdminUser(adminRole.id);
-  const permissions = await ensurePermissions();
-  await ensureAdminHasAllPermissions(adminRole.id, permissions);
-  // Cliente genérico para ventas en tienda sin cliente registrado
-  await prisma.client.upsert({
-    where: { email: 'consumidor.final@bionatural.local' },
-    update: {},
-    create: {
-      name: 'Consumidor Final',
-      email: 'consumidor.final@bionatural.local',
-      address: 'Venta en tienda',
-      isActive: true,
-    },
-  });
+  try {
+    // Crear categorías iniciales
+    const categories = [
+      { name: 'Suplementos', description: 'Suplementos naturales y vitaminas' },
+      { name: 'Cuidado Personal', description: 'Productos de cuidado personal orgánicos' },
+      { name: 'Alimentación', description: 'Alimentos orgánicos y naturales' },
+      { name: 'Bebidas', description: 'Bebidas naturales y tés' },
+      { name: 'Aceites Esenciales', description: 'Aceites esenciales puros' }
+    ];
+
+    for (const category of categories) {
+      await prisma.category.upsert({
+        where: { name: category.name },
+        update: {},
+        create: {
+          name: category.name,
+          description: category.description,
+          isActive: true
+        }
+      });
+    }
+
+    // Crear roles iniciales
+    const roles = [
+      { name: 'Administrador', description: 'Acceso completo al sistema' },
+      { name: 'Cliente', description: 'Cliente del sistema' },
+      { name: 'Empleado', description: 'Empleado de la empresa' }
+    ];
+
+    for (const role of roles) {
+      await prisma.role.upsert({
+        where: { name: role.name },
+        update: {},
+        create: {
+          name: role.name,
+          description: role.description,
+          isActive: true
+        }
+      });
+    }
+
+    // Crear productos de ejemplo
+    const sampleProducts = [
+      {
+        name: 'Vitamina C Natural',
+        description: 'Vitamina C extraída de acerola orgánica, 1000mg por cápsula',
+        price: 45000,
+        stock: 50,
+        minStock: 10,
+        sku: 'VIT-C-1000',
+        categoryName: 'Suplementos'
+      },
+      {
+        name: 'Aceite de Coco Orgánico',
+        description: 'Aceite de coco virgen extra, prensado en frío, 500ml',
+        price: 32000,
+        stock: 30,
+        minStock: 5,
+        sku: 'ACE-COCO-500',
+        categoryName: 'Cuidado Personal'
+      },
+      {
+        name: 'Té Verde Matcha',
+        description: 'Té verde matcha premium japonés, 100g',
+        price: 55000,
+        stock: 25,
+        minStock: 8,
+        sku: 'TE-MATCHA-100',
+        categoryName: 'Bebidas'
+      },
+      {
+        name: 'Quinoa Orgánica',
+        description: 'Quinoa orgánica boliviana, 500g',
+        price: 28000,
+        stock: 40,
+        minStock: 10,
+        sku: 'QUINOA-500',
+        categoryName: 'Alimentación'
+      },
+      {
+        name: 'Aceite Esencial Lavanda',
+        description: 'Aceite esencial de lavanda puro, 15ml',
+        price: 38000,
+        stock: 20,
+        minStock: 5,
+        sku: 'AE-LAVANDA-15',
+        categoryName: 'Aceites Esenciales'
+      },
+      {
+        name: 'Proteína Vegetal',
+        description: 'Proteína vegetal de guisante y arroz, sabor vainilla, 1kg',
+        price: 85000,
+        stock: 15,
+        minStock: 3,
+        sku: 'PROT-VEG-1KG',
+        categoryName: 'Suplementos'
+      },
+      {
+        name: 'Champú Natural',
+        description: 'Champú natural sin sulfatos con aceite de argán, 300ml',
+        price: 42000,
+        stock: 35,
+        minStock: 8,
+        sku: 'CHAMP-NAT-300',
+        categoryName: 'Cuidado Personal'
+      },
+      {
+        name: 'Miel de Manuka',
+        description: 'Miel de Manuka UMF 15+, 250g',
+        price: 95000,
+        stock: 12,
+        minStock: 3,
+        sku: 'MIEL-MANUKA-250',
+        categoryName: 'Alimentación'
+      }
+    ];
+
+    for (const product of sampleProducts) {
+      const category = await prisma.category.findFirst({
+        where: { name: product.categoryName }
+      });
+
+      if (category) {
+        await prisma.product.upsert({
+          where: { sku: product.sku },
+          update: {},
+          create: {
+            name: product.name,
+            description: product.description,
+            price: product.price,
+            stock: product.stock,
+            minStock: product.minStock,
+            sku: product.sku,
+            categoryId: category.id,
+            isActive: true
+          }
+        });
+      }
+    }
+
+    console.log('✅ Initial data created successfully');
+  } catch (error) {
+    console.error('❌ Error creating initial data:', error);
+    throw error;
+  }
 };
 
 module.exports = { ensureInitialData };

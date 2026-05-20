@@ -24,6 +24,70 @@ interface LandingPageProps {
   onLoginOpen?: () => void;
 }
 
+// ── Hero con carrusel automático de productos reales ─────────────────────────
+function HeroCarousel({ products, onLoginOpen }: { products: { id: string | number; image?: string; name: string }[]; onLoginOpen?: () => void }) {
+  const [current, setCurrent] = React.useState(0);
+  const images = products.filter(p => p.image).map(p => ({ id: p.id, src: p.image!, name: p.name }));
+
+  React.useEffect(() => {
+    if (images.length === 0) return;
+    const t = setInterval(() => setCurrent(c => (c + 1) % images.length), 4000);
+    return () => clearInterval(t);
+  }, [images.length]);
+
+  const bgSrc = images.length > 0 ? images[current % images.length].src : 'https://images.unsplash.com/photo-1556228578-8c89e6adf883?w=1400&q=80';
+
+  return (
+    <section style={{ position: 'relative', height: 580, overflow: 'hidden', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+      {/* Imagen de fondo — cambia automáticamente */}
+      <img key={bgSrc} src={bgSrc} alt="Producto"
+        style={{ position: 'absolute', inset: 0, width: '100%', height: '100%', objectFit: 'cover', animation: 'heroFade 0.8s ease-in-out', transition: 'opacity 0.8s' }}
+        onError={e => { (e.target as HTMLImageElement).src = 'https://images.unsplash.com/photo-1556228578-8c89e6adf883?w=1400&q=80'; }} />
+
+      {/* Overlay */}
+      <div style={{ position: 'absolute', inset: 0, background: 'linear-gradient(135deg, rgba(0,0,0,0.75) 0%, rgba(0,0,0,0.4) 55%, rgba(58,125,68,0.2) 100%)' }} />
+
+      {/* Contenido */}
+      <div style={{ position: 'relative', zIndex: 10, textAlign: 'center', padding: '0 24px', maxWidth: 680 }}>
+        <div style={{ display: 'inline-flex', alignItems: 'center', gap: 6, backgroundColor: 'rgba(255,255,255,0.15)', border: '1px solid rgba(255,255,255,0.3)', borderRadius: 99, padding: '6px 14px', marginBottom: 24, backdropFilter: 'blur(8px)' }}>
+          <Sparkles style={{ width: 12, height: 12, color: '#81C784' }} />
+          <span style={{ fontSize: 12, color: 'rgba(255,255,255,0.9)', fontWeight: 500, letterSpacing: '0.03em' }}>100% Natural · Sin conservantes · Orgánico</span>
+        </div>
+        <h1 style={{ fontSize: 52, fontWeight: 800, color: 'white', lineHeight: 1.1, letterSpacing: '-0.03em', marginBottom: 16, textShadow: '0 2px 20px rgba(0,0,0,0.3)' }}>
+          Tu bienestar,<br /><span style={{ color: '#81C784' }}>nuestra misión</span>
+        </h1>
+        <p style={{ fontSize: 16, color: 'rgba(255,255,255,0.78)', lineHeight: 1.7, maxWidth: 480, margin: '0 auto 36px' }}>
+          Hierbas medicinales, aceites esenciales y suplementos orgánicos seleccionados con cuidado para tu bienestar.
+        </p>
+        <div style={{ display: 'flex', gap: 12, justifyContent: 'center', flexWrap: 'wrap' as const }}>
+          <button onClick={() => onLoginOpen?.()} style={{ padding: '14px 32px', borderRadius: 12, backgroundColor: '#3A7D44', color: 'white', fontSize: 15, fontWeight: 700, border: 'none', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 8, boxShadow: '0 4px 20px rgba(58,125,68,0.4)' }}>
+            <ShoppingCart style={{ width: 18, height: 18 }} /> Comprar ahora
+          </button>
+          <button onClick={() => onLoginOpen?.()} style={{ padding: '14px 28px', borderRadius: 12, backgroundColor: 'rgba(255,255,255,0.15)', color: 'white', fontSize: 15, fontWeight: 600, border: '1.5px solid rgba(255,255,255,0.4)', cursor: 'pointer', backdropFilter: 'blur(8px)' }}>
+            Crear cuenta gratis
+          </button>
+        </div>
+        <div style={{ marginTop: 28, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6 }}>
+          <div style={{ display: 'flex', gap: 2 }}>
+            {[1,2,3,4,5].map(i => <Star key={i} style={{ width: 14, height: 14, fill: '#FBBF24', color: '#FBBF24' }} />)}
+          </div>
+          <span style={{ fontSize: 12, color: 'rgba(255,255,255,0.65)' }}>Más de 500 clientes satisfechos</span>
+        </div>
+      </div>
+
+      {/* Indicadores del carrusel */}
+      {images.length > 1 && (
+        <div style={{ position: 'absolute', bottom: 20, left: '50%', transform: 'translateX(-50%)', display: 'flex', gap: 6, zIndex: 10 }}>
+          {images.map((_, i) => (
+            <button key={i} onClick={() => setCurrent(i)}
+              style={{ width: i === current ? 24 : 8, height: 8, borderRadius: 99, backgroundColor: i === current ? 'white' : 'rgba(255,255,255,0.4)', border: 'none', cursor: 'pointer', transition: 'all 0.3s', padding: 0 }} />
+          ))}
+        </div>
+      )}
+    </section>
+  );
+}
+
 export const LandingPage: React.FC<LandingPageProps> = ({ onLoginOpen }) => {
   const [searchTerm, setSearchTerm] = useState('');
   const [categoryFilter, setCategoryFilter] = useState('all');
@@ -112,63 +176,8 @@ export const LandingPage: React.FC<LandingPageProps> = ({ onLoginOpen }) => {
 
       <main style={{ flex: 1 }}>
 
-        {/* ══ HERO ══ */}
-        <section style={{ position: 'relative', height: 580, overflow: 'hidden', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-          {/* Imagen */}
-          <img
-            src="https://images.unsplash.com/photo-1556228578-8c89e6adf883?w=1400&q=80"
-            alt="Productos naturales"
-            style={{ position: 'absolute', inset: 0, width: '100%', height: '100%', objectFit: 'cover' }}
-            onError={e => { (e.target as HTMLImageElement).src = 'https://images.unsplash.com/photo-1464226184884-fa280b87c399?w=1400&q=80'; }}
-          />
-          {/* Overlay */}
-          <div style={{ position: 'absolute', inset: 0, background: 'linear-gradient(135deg, rgba(0,0,0,0.72) 0%, rgba(0,0,0,0.35) 60%, rgba(58,125,68,0.25) 100%)' }} />
-
-          {/* Contenido */}
-          <div style={{ position: 'relative', zIndex: 10, textAlign: 'center', padding: '0 24px', maxWidth: 680 }}>
-            {/* Pill */}
-            <div style={{ display: 'inline-flex', alignItems: 'center', gap: 6, backgroundColor: 'rgba(255,255,255,0.15)', border: '1px solid rgba(255,255,255,0.3)', borderRadius: 99, padding: '6px 14px', marginBottom: 24, backdropFilter: 'blur(8px)' }}>
-              <Sparkles style={{ width: 12, height: 12, color: '#81C784' }} />
-              <span style={{ fontSize: 12, color: 'rgba(255,255,255,0.9)', fontWeight: 500, letterSpacing: '0.03em' }}>100% Natural · Sin conservantes · Orgánico</span>
-            </div>
-
-            {/* Título */}
-            <h1 style={{ fontSize: 52, fontWeight: 800, color: 'white', lineHeight: 1.1, letterSpacing: '-0.03em', marginBottom: 16, textShadow: '0 2px 20px rgba(0,0,0,0.3)' }}>
-              Tu bienestar,<br />
-              <span style={{ color: '#81C784' }}>nuestra misión</span>
-            </h1>
-
-            {/* Subtítulo */}
-            <p style={{ fontSize: 16, color: 'rgba(255,255,255,0.78)', lineHeight: 1.7, marginBottom: 36, maxWidth: 480, margin: '0 auto 36px' }}>
-              Hierbas medicinales, aceites esenciales y suplementos orgánicos seleccionados con cuidado para tu bienestar.
-            </p>
-
-            {/* Botones */}
-            <div style={{ display: 'flex', gap: 12, justifyContent: 'center', flexWrap: 'wrap' }}>
-              <button
-                onClick={() => onLoginOpen?.()}
-                style={{ padding: '14px 32px', borderRadius: 12, backgroundColor: '#3A7D44', color: 'white', fontSize: 15, fontWeight: 700, border: 'none', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 8, boxShadow: '0 4px 20px rgba(58,125,68,0.4)' }}
-              >
-                <ShoppingCart style={{ width: 18, height: 18 }} />
-                Comprar ahora
-              </button>
-              <button
-                onClick={() => onLoginOpen?.()}
-                style={{ padding: '14px 28px', borderRadius: 12, backgroundColor: 'rgba(255,255,255,0.15)', color: 'white', fontSize: 15, fontWeight: 600, border: '1.5px solid rgba(255,255,255,0.4)', cursor: 'pointer', backdropFilter: 'blur(8px)' }}
-              >
-                Crear cuenta gratis
-              </button>
-            </div>
-
-            {/* Social proof */}
-            <div style={{ marginTop: 28, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6 }}>
-              <div style={{ display: 'flex', gap: 2 }}>
-                {[1,2,3,4,5].map(i => <Star key={i} style={{ width: 14, height: 14, fill: '#FBBF24', color: '#FBBF24' }} />)}
-              </div>
-              <span style={{ fontSize: 12, color: 'rgba(255,255,255,0.65)' }}>Más de 500 clientes satisfechos</span>
-            </div>
-          </div>
-        </section>
+        {/* ══ HERO con carrusel de productos reales ══ */}
+        <HeroCarousel products={apiProducts} onLoginOpen={onLoginOpen} />
 
         {/* ══ BENEFICIOS ══ */}
         <section style={{ maxWidth: 1200, margin: '0 auto', padding: '48px 24px' }}>
@@ -191,8 +200,63 @@ export const LandingPage: React.FC<LandingPageProps> = ({ onLoginOpen }) => {
           </div>
         </section>
 
+        {/* ══ CARRUSEL DESTACADOS ══ */}
+        {!loading && apiProducts.length > 0 && (
+          <section style={{ maxWidth: 1200, margin: '0 auto', padding: '0 24px 48px' }}>
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 16 }}>
+              <div>
+                <h2 style={{ fontSize: 22, fontWeight: 800, color: '#1C1C1A', letterSpacing: '-0.02em', marginBottom: 4 }}>Productos destacados</h2>
+                <p style={{ fontSize: 13, color: '#737370' }}>Los más populares de nuestra tienda natural</p>
+              </div>
+              <button onClick={() => onLoginOpen?.()} style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 13, fontWeight: 600, color: '#3A7D44', background: 'none', border: '1.5px solid #B7E4C7', borderRadius: 10, padding: '8px 16px', cursor: 'pointer', backgroundColor: '#F0FDF4' }}>
+                Ver todos <ArrowRight style={{ width: 14, height: 14 }} />
+              </button>
+            </div>
+            <div style={{ display: 'flex', gap: 16, overflowX: 'auto', paddingBottom: 8, scrollbarWidth: 'none' as const }}>
+              {apiProducts.slice(0, 8).map(product => (
+                <div key={product.id}
+                  onClick={handleBuy}
+                  style={{ minWidth: 190, maxWidth: 190, borderRadius: 18, border: '1px solid #E5E5E2', backgroundColor: 'white', overflow: 'hidden', cursor: 'pointer', flexShrink: 0, transition: 'transform 0.18s, box-shadow 0.18s', boxShadow: '0 2px 8px rgba(0,0,0,0.06)' }}
+                  onMouseEnter={e => { const el = e.currentTarget as HTMLDivElement; el.style.transform = 'translateY(-4px)'; el.style.boxShadow = '0 12px 32px rgba(0,0,0,0.12)'; }}
+                  onMouseLeave={e => { const el = e.currentTarget as HTMLDivElement; el.style.transform = 'translateY(0)'; el.style.boxShadow = '0 2px 8px rgba(0,0,0,0.06)'; }}>
+                  {/* Imagen */}
+                  <div style={{ position: 'relative', height: 160, backgroundColor: '#F0F4EF', overflow: 'hidden' }}>
+                    {product.image ? (
+                      <img src={product.image} alt={product.name} style={{ width: '100%', height: '100%', objectFit: 'cover', transition: 'transform 0.3s' }}
+                        onMouseEnter={e => { (e.target as HTMLImageElement).style.transform = 'scale(1.06)'; }}
+                        onMouseLeave={e => { (e.target as HTMLImageElement).style.transform = 'scale(1)'; }}
+                        onError={e => { (e.target as HTMLImageElement).style.display = 'none'; }} />
+                    ) : (
+                      <div style={{ width: '100%', height: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                        <Leaf style={{ width: 36, height: 36, color: '#3A7D44', opacity: 0.4 }} />
+                      </div>
+                    )}
+                    {/* Precio overlay */}
+                    <div style={{ position: 'absolute', bottom: 0, left: 0, right: 0, background: 'linear-gradient(to top, rgba(0,0,0,0.55), transparent)', padding: '20px 12px 10px' }}>
+                      <span style={{ fontSize: 13, fontWeight: 800, color: 'white' }}>{formatCOP(product.price)}</span>
+                    </div>
+                    {product.stock < 10 && (
+                      <div style={{ position: 'absolute', top: 8, left: 8 }}>
+                        <span style={{ backgroundColor: '#EF4444', color: 'white', fontSize: 10, fontWeight: 700, padding: '3px 8px', borderRadius: 99 }}>¡{product.stock} restantes!</span>
+                      </div>
+                    )}
+                  </div>
+                  {/* Info */}
+                  <div style={{ padding: '12px 14px 14px' }}>
+                    <p style={{ fontSize: 12, fontWeight: 700, color: '#1C1C1A', margin: '0 0 2px', lineHeight: 1.3, display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical', overflow: 'hidden' } as any}>{product.name}</p>
+                    <p style={{ fontSize: 10, color: '#737370', margin: '0 0 10px' }}>{product.category}</p>
+                    <button onClick={handleBuy} style={{ width: '100%', height: 34, borderRadius: 10, border: 'none', backgroundColor: '#3A7D44', color: 'white', fontSize: 11, fontWeight: 700, cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 5 }}>
+                      <ShoppingCart style={{ width: 11, height: 11 }} /> Agregar
+                    </button>
+                  </div>
+                </div>
+              ))}
+            </div>
+          </section>
+        )}
+
         {/* ══ CATÁLOGO ══ */}
-        <section style={{ maxWidth: 1200, margin: '0 auto', padding: '0 24px 64px' }}>
+        <section id="catalogo" style={{ maxWidth: 1200, margin: '0 auto', padding: '0 24px 64px' }}>
 
           {/* Header catálogo */}
           <div style={{ display: 'flex', alignItems: 'flex-end', justifyContent: 'space-between', marginBottom: 24, flexWrap: 'wrap', gap: 16 }}>
@@ -202,27 +266,83 @@ export const LandingPage: React.FC<LandingPageProps> = ({ onLoginOpen }) => {
                 {loading ? 'Cargando productos...' : `${filteredProducts.length} productos disponibles`}
               </p>
             </div>
-            {/* Filtros */}
-            <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap' }}>
-              <div style={{ position: 'relative' }}>
-                <Search style={{ position: 'absolute', left: 12, top: '50%', transform: 'translateY(-50%)', width: 15, height: 15, color: '#737370', pointerEvents: 'none' }} />
+            {/* Filtros Modernos */}
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 16, width: '100%' }}>
+              <div style={{ position: 'relative', width: '100%', maxWidth: 350 }}>
+                <Search style={{ position: 'absolute', left: 14, top: '50%', transform: 'translateY(-50%)', width: 18, height: 18, color: '#A3A3A3', pointerEvents: 'none' }} />
                 <input
-                  placeholder="Buscar productos..."
+                  placeholder="Busca en el catálogo..."
                   value={searchTerm}
                   onChange={e => setSearchTerm(e.target.value)}
-                  style={{ paddingLeft: 36, paddingRight: 14, height: 40, borderRadius: 10, border: '1px solid #E5E5E2', backgroundColor: 'white', fontSize: 13, color: '#1C1C1A', outline: 'none', width: 220 }}
+                  style={{ 
+                    width: '100%',
+                    paddingLeft: 42, 
+                    paddingRight: 16, 
+                    height: 44, 
+                    borderRadius: 14, 
+                    border: '1.5px solid #E5E5E2', 
+                    backgroundColor: 'white', 
+                    fontSize: 14, 
+                    color: '#1C1C1A', 
+                    outline: 'none',
+                    transition: 'all 0.2s',
+                    boxShadow: '0 2px 4px rgba(0,0,0,0.02)'
+                  }}
+                  onFocus={e => e.currentTarget.style.borderColor = '#3A7D44'}
+                  onBlur={e => e.currentTarget.style.borderColor = '#E5E5E2'}
                 />
               </div>
-              <select
-                value={categoryFilter}
-                onChange={e => setCategoryFilter(e.target.value)}
-                style={{ height: 40, borderRadius: 10, border: '1px solid #E5E5E2', backgroundColor: 'white', fontSize: 13, color: '#1C1C1A', padding: '0 14px', outline: 'none', cursor: 'pointer', minWidth: 160 }}
-              >
-                <option value="all">Todas las categorías</option>
+
+              {/* Selector de Categorías Estilo Tabs */}
+              <div style={{ 
+                display: 'flex', 
+                gap: 8, 
+                overflowX: 'auto', 
+                paddingBottom: 8, 
+                paddingTop: 4,
+                scrollbarWidth: 'none',
+                msOverflowStyle: 'none'
+              } as any}>
+                <button
+                  onClick={() => setCategoryFilter('all')}
+                  style={{
+                    padding: '10px 24px',
+                    borderRadius: 12,
+                    fontSize: 13,
+                    fontWeight: 700,
+                    cursor: 'pointer',
+                    border: 'none',
+                    transition: 'all 0.25s cubic-bezier(0.4, 0, 0.2, 1)',
+                    backgroundColor: categoryFilter === 'all' ? '#3A7D44' : '#F4F4F2',
+                    color: categoryFilter === 'all' ? 'white' : '#737370',
+                    whiteSpace: 'nowrap',
+                    boxShadow: categoryFilter === 'all' ? '0 4px 12px rgba(58,125,68,0.25)' : 'none'
+                  }}
+                >
+                  Todos
+                </button>
                 {categories.filter(c => c !== 'all').map(cat => (
-                  <option key={cat} value={cat}>{cat}</option>
+                  <button
+                    key={cat}
+                    onClick={() => setCategoryFilter(cat)}
+                    style={{
+                      padding: '10px 24px',
+                      borderRadius: 12,
+                      fontSize: 13,
+                      fontWeight: 700,
+                      cursor: 'pointer',
+                      transition: 'all 0.25s cubic-bezier(0.4, 0, 0.2, 1)',
+                      backgroundColor: categoryFilter === cat ? '#3A7D44' : 'white',
+                      color: categoryFilter === cat ? 'white' : '#737370',
+                      border: categoryFilter === cat ? 'none' : '1.5px solid #E5E5E2',
+                      whiteSpace: 'nowrap',
+                      boxShadow: categoryFilter === cat ? '0 4px 12px rgba(58,125,68,0.25)' : 'none'
+                    }}
+                  >
+                    {cat}
+                  </button>
                 ))}
-              </select>
+              </div>
             </div>
           </div>
 
@@ -264,14 +384,28 @@ export const LandingPage: React.FC<LandingPageProps> = ({ onLoginOpen }) => {
                 >
                   {/* Imagen */}
                   <div style={{ position: 'relative', aspectRatio: '1', overflow: 'hidden', backgroundColor: '#F4F4F2' }}>
-                    <img
-                      src={product.image}
-                      alt={product.name}
-                      style={{ width: '100%', height: '100%', objectFit: 'cover', transition: 'transform 0.3s ease' }}
-                      onError={e => { (e.target as HTMLImageElement).style.display = 'none'; }}
-                      onMouseEnter={e => { (e.target as HTMLImageElement).style.transform = 'scale(1.06)'; }}
-                      onMouseLeave={e => { (e.target as HTMLImageElement).style.transform = 'scale(1)'; }}
-                    />
+                    {product.image ? (
+                      <img
+                        src={product.image}
+                        alt={product.name}
+                        style={{ width: '100%', height: '100%', objectFit: 'cover', transition: 'transform 0.3s ease' }}
+                        onError={e => {
+                          const img = e.target as HTMLImageElement;
+                          img.style.display = 'none';
+                          const ph = img.parentElement?.querySelector('.img-placeholder') as HTMLElement;
+                          if (ph) ph.style.display = 'flex';
+                        }}
+                        onMouseEnter={e => { (e.target as HTMLImageElement).style.transform = 'scale(1.06)'; }}
+                        onMouseLeave={e => { (e.target as HTMLImageElement).style.transform = 'scale(1)'; }}
+                      />
+                    ) : null}
+                    {/* Placeholder */}
+                    <div className="img-placeholder" style={{ display: product.image ? 'none' : 'flex', position: 'absolute', inset: 0, flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 6, backgroundColor: '#F0F7F1' }}>
+                      <div style={{ width: 48, height: 48, borderRadius: 14, backgroundColor: 'rgba(58,125,68,0.12)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                        <Leaf style={{ width: 24, height: 24, color: '#3A7D44' }} />
+                      </div>
+                      <span style={{ fontSize: 10, color: '#3A7D44', fontWeight: 600, opacity: 0.7 }}>{product.category}</span>
+                    </div>
                     {/* Precio overlay */}
                     <div style={{ position: 'absolute', bottom: 0, left: 0, right: 0, background: 'linear-gradient(to top, rgba(0,0,0,0.6), transparent)', padding: '20px 12px 10px' }}>
                       <span style={{ fontSize: 13, fontWeight: 800, color: 'white' }}>{formatCOP(product.price)}</span>
@@ -288,7 +422,17 @@ export const LandingPage: React.FC<LandingPageProps> = ({ onLoginOpen }) => {
 
                   {/* Info */}
                   <div style={{ padding: '14px 14px 16px' }}>
-                    <p style={{ fontSize: 13, fontWeight: 600, color: '#1C1C1A', lineHeight: 1.4, marginBottom: 3, display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical', overflow: 'hidden' }}>
+                    <p style={{ 
+                      fontSize: 13, 
+                      fontWeight: 600, 
+                      color: '#1C1C1A', 
+                      lineHeight: 1.4, 
+                      marginBottom: 3, 
+                      display: '-webkit-box', 
+                      WebkitLineClamp: 2, 
+                      WebkitBoxOrient: 'vertical', 
+                      overflow: 'hidden' 
+                    } as any}>
                       {product.name}
                     </p>
                     <p style={{ fontSize: 11, color: '#737370', marginBottom: 12 }}>{product.category}</p>

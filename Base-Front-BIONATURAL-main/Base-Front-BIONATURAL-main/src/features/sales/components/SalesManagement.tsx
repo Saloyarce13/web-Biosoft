@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useState, useCallback } from 'react';
 import { Button } from '../../../components/ui/button';
 import { Card, CardContent } from '../../../components/ui/card';
 import { Input } from '../../../components/ui/input';
@@ -6,14 +6,26 @@ import { Label } from '../../../components/ui/label';
 import { Badge } from '../../../components/ui/badge';
 import { Textarea } from '../../../components/ui/textarea';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '../../../components/ui/select';
+import { Popover, PopoverContent, PopoverTrigger } from '../../../components/ui/popover';
+import { Command, CommandEmpty, CommandGroup, CommandInput, CommandItem, CommandList } from '../../../components/ui/command';
+import { cn } from '../../../components/ui/utils';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '../../../components/ui/table';
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '../../../components/ui/dialog';
 import { Separator } from '../../../components/ui/separator';
+import { Switch } from '../../../components/ui/switch';
+import { DataTable, Column } from '../../../shared/components/DataTable';
 import { toast } from 'sonner';
 import { getSales, getClients, getProducts, createSale, apiFetch } from '../../../lib/api';
+import { useSaleStatuses } from '../../../shared/contexts/SystemConfigContext';
+import {
+  Row, Col, Card as AntCard, Table as AntTable, Select as AntSelect,
+  InputNumber, Button as AntButton, Typography, Divider, Space,
+  Badge as AntBadge, Switch as AntSwitch
+} from 'antd';
 import {
   DollarSign, Search, Eye, ChevronLeft, ChevronRight,
-  RefreshCw, Users, Package, Download, FileText, CheckCircle, Plus, X, Store
+  RefreshCw, Users, User, Package, Download, FileText, CheckCircle, Plus, X, Store,
+  Check, ChevronsUpDown, LayoutGrid, AlertCircle, AlertTriangle, ShoppingCart, ShoppingBag, Zap
 } from 'lucide-react';
 
 // ── Tipos ──────────────────────────────────────────────────────────────────────
@@ -23,7 +35,7 @@ interface ApiSale {
   totalPrice: number;
   notes: string | null;
   saleDate: string;
-  client: { id: number; name: string; email: string | null; phone: string | null };
+  client: { id: number; name: string; email: string | null; phone: string | null; documentNumber: string | null };
   employee: { id: number; fullName: string } | null;
   items: ApiSaleItem[];
 }
@@ -46,15 +58,16 @@ interface CartItem {
   lineTotal: number;
 }
 
-const STATUS_COLORS: Record<string, string> = {
+const STATUS_COLORS_FALLBACK: Record<string, string> = {
   COMPLETED: 'bg-green-100 text-green-800',
   CANCELLED: 'bg-gray-100 text-gray-800',
-  ANNULED:   'bg-red-100 text-red-800',
-  REGISTERED:'bg-blue-100 text-blue-800',
+  ANNULED: 'bg-red-100 text-red-800',
+  REGISTERED: 'bg-blue-100 text-blue-800',
+  READY: 'bg-yellow-100 text-yellow-800',
 };
-const STATUS_LABELS: Record<string, string> = {
+const STATUS_LABELS_FALLBACK: Record<string, string> = {
   COMPLETED: 'Completada', CANCELLED: 'Cancelada',
-  ANNULED: 'Anulada', REGISTERED: 'Registrada',
+  ANNULED: 'Anulada', REGISTERED: 'Registrada', READY: 'Lista para recoger',
 };
 
 const ITEMS_PER_PAGE = 10;
@@ -82,7 +95,7 @@ async function generateSalePDF(sale: ApiSale): Promise<string> {
   doc.text(`Venta #${sale.id}`, pageW - margin, 14, { align: 'right' });
   doc.setFontSize(9); doc.setFont('helvetica', 'normal');
   doc.text(new Date(sale.saleDate).toLocaleDateString('es-CO', { year: 'numeric', month: 'long', day: 'numeric' }), pageW - margin, 20, { align: 'right' });
-  doc.text(`Estado: ${STATUS_LABELS[sale.status] || sale.status}`, pageW - margin, 27, { align: 'right' });
+  doc.text(`Estado: ${STATUS_LABELS_FALLBACK[sale.status] || sale.status}`, pageW - margin, 27, { align: 'right' });
 
   let y = 42;
   doc.setTextColor(30, 30, 30);
@@ -142,18 +155,21 @@ async function generateSalePDF(sale: ApiSale): Promise<string> {
 
 // ── Componente principal ───────────────────────────────────────────────────────
 export function SalesManagement({ user }: { user?: { role: string; permissions: string[] } | null }) {
+  const saleStatuses = useSaleStatuses();
+  // Construir mapas desde la BD
+  const STATUS_COLORS: Record<string, string> = Object.fromEntries(saleStatuses.map(s => [s.value, s.color]));
+  const STATUS_LABELS: Record<string, string> = Object.fromEntries(saleStatuses.map(s => [s.value, s.label]));
+
   const canSell = user
     ? ['Administrador', 'administrador', 'Vendedor', 'vendedor'].includes(user.role) ||
-      (user.permissions ?? []).includes('sales.manage')
+    (user.permissions ?? []).includes('sales.manage')
     : false;
 
   const [sales, setSales] = useState<ApiSale[]>([]);
   const [clients, setClients] = useState<any[]>([]);
   const [products, setProducts] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
-  const [searchTerm, setSearchTerm] = useState('');
   const [statusFilter, setStatusFilter] = useState('COMPLETED');
-  const [currentPage, setCurrentPage] = useState(1);
   const [view, setView] = useState<'list' | 'create'>('list');
 
   // Formulario venta en tienda
@@ -161,7 +177,12 @@ export function SalesManagement({ user }: { user?: { role: string; permissions: 
   const [notes, setNotes] = useState('');
   const [cart, setCart] = useState<CartItem[]>([]);
   const [productSearch, setProductSearch] = useState('');
+  const [searchTerm, setSearchTerm] = useState('');
+  const [isDirectSale, setIsDirectSale] = useState(true);
   const [creating, setCreating] = useState(false);
+  const [tempProduct, setTempProduct] = useState<any>(null);
+  const [tempQuantity, setTempQuantity] = useState<number>(1);
+  const [receivedAmount, setReceivedAmount] = useState<number>(0);
 
   // Detalle
   const [selectedSale, setSelectedSale] = useState<ApiSale | null>(null);
@@ -174,7 +195,7 @@ export function SalesManagement({ user }: { user?: { role: string; permissions: 
   const [pdfSale, setPdfSale] = useState<ApiSale | null>(null);
   const [generatingPdf, setGeneratingPdf] = useState(false);
 
-  const load = async () => {
+  const load = useCallback(async () => {
     try {
       setLoading(true);
       // Solo cargar ventas COMPLETADAS en este módulo
@@ -183,24 +204,35 @@ export function SalesManagement({ user }: { user?: { role: string; permissions: 
         getClients(),
         getProducts(true),
       ]);
-      if (sRes.success) setSales((sRes.data as any[]).filter((s: any) => s.status === 'COMPLETED'));
-      if (cRes.success) setClients(cRes.data.filter((c: any) => c.isActive));
+      if (sRes.success) setSales(sRes.data as any[]);
+      if (cRes.success) {
+        const activeClients = cRes.data.filter((c: any) => c.isActive);
+        setClients(activeClients);
+
+        // Autoseleccionar Consumidor Final para Transacción Directa
+        const cf = activeClients.find((c: any) => c.name?.toLowerCase().includes('consumidor final') || c.id === 1 || String(c.id) === '1');
+        if (cf) setClientId(String(cf.id));
+        else setClientId('1'); // Fallback standard
+      }
       if (pRes.success) setProducts(pRes.data.filter((p: any) => p.isActive));
     } catch { toast.error('Error al cargar ventas'); }
     finally { setLoading(false); }
-  };
+  }, []);
 
-  useEffect(() => { load(); }, []);
+  useEffect(() => { load(); }, [load]);
 
   // Solo mostrar ventas completadas (y opcionalmente canceladas/anuladas)
   const filtered = sales.filter(s => {
     const matchStatus = statusFilter === 'all' ? s.status !== 'REGISTERED' : s.status === statusFilter;
-    const matchSearch = s.client.name.toLowerCase().includes(searchTerm.toLowerCase()) || String(s.id).includes(searchTerm);
-    return matchStatus && matchSearch;
+    return matchStatus;
   });
 
-  const totalPages = Math.ceil(filtered.length / ITEMS_PER_PAGE);
-  const paginated = filtered.slice((currentPage - 1) * ITEMS_PER_PAGE, currentPage * ITEMS_PER_PAGE);
+  // Expandir client.name para searchableKeys
+  const dataForTable = filtered.map(s => ({
+    ...s,
+    clientName: s.client?.name || '',
+    clientEmail: s.client?.email || ''
+  }));
 
   // Estadísticas — solo ventas completadas
   const completed = sales.filter(s => s.status === 'COMPLETED');
@@ -209,191 +241,413 @@ export function SalesManagement({ user }: { user?: { role: string; permissions: 
 
   // ── Carrito ────────────────────────────────────────────────────────────────
   const filteredProducts = productSearch.length >= 1
-    ? products.filter(p => p.name.toLowerCase().includes(productSearch.toLowerCase()) || (p.sku || '').toLowerCase().includes(productSearch.toLowerCase())).slice(0, 8)
-    : products.slice(0, 8);
+    ? products.filter(p => p.name.toLowerCase().includes(productSearch.toLowerCase()) || (p.sku || '').toLowerCase().includes(productSearch.toLowerCase()))
+    : products;
 
-  const addToCart = (product: any) => {
-    if (cart.find(c => c.productId === product.id)) { toast.error('Ya está en la venta'); return; }
-    setCart(prev => [...prev, {
-      productId: product.id, productName: product.name, sku: product.sku || '',
-      quantity: 1, unitPrice: Number(product.price) || 0,
-      lineTotal: Number(product.price) || 0,
-    }]);
-    setProductSearch('');
+  const addToCart = (product: any, qty: number = 1) => {
+    setCart(prev => {
+      const existing = prev.find(item => item.productId === product.id);
+      if (existing) {
+        const newQty = existing.quantity + qty;
+        return prev.map(item => item.productId === product.id
+          ? { ...item, quantity: newQty, lineTotal: newQty * item.unitPrice }
+          : item
+        );
+      }
+      return [...prev, {
+        productId: product.id,
+        productName: product.name,
+        sku: product.sku || '',
+        quantity: qty,
+        unitPrice: Number(product.price) || 0,
+        lineTotal: (Number(product.price) || 0) * qty
+      }];
+    });
   };
 
   const updateCartItem = (productId: number, field: 'quantity' | 'unitPrice', value: number) => {
     setCart(prev => prev.map(c => {
       if (c.productId !== productId) return c;
+      if (field === 'quantity') {
+        const prod = products.find(p => p.id === productId);
+        const maxStock = prod?.stock ?? 9999;
+        if (value > maxStock) {
+          toast.error(`Stock disponible: ${maxStock} unidades`);
+          value = maxStock;
+        }
+        if (value < 1) value = 1;
+      }
       const u = { ...c, [field]: value };
       u.lineTotal = Math.round(u.quantity * u.unitPrice * 100) / 100;
       return u;
     }));
   };
 
-  const cartTotal = cart.reduce((s, c) => s + c.lineTotal, 0);
+  const removeFromCart = (productId: number) => {
+    setCart(prev => prev.filter(item => item.productId !== productId));
+    toast.info('Producto eliminado del carrito');
+  };
 
   const handleCreateSale = async () => {
-    if (!clientId) { toast.error('Selecciona un cliente'); return; }
     if (cart.length === 0) { toast.error('Agrega al menos un producto'); return; }
-    if (cart.some(c => c.quantity <= 0)) { toast.error('Las cantidades deben ser mayores a 0'); return; }
-    if (cart.some(c => c.unitPrice <= 0)) { toast.error('Los precios deben ser mayores a 0'); return; }
-    // Validar stock
-    for (const item of cart) {
-      const prod = products.find(p => p.id === item.productId);
-      if (prod && prod.stock < item.quantity) {
-        toast.error(`Stock insuficiente para "${item.productName}": disponible ${prod.stock}`); return;
-      }
+
+    // Si es venta directa y no hay clientId, intentar buscar Consumidor Final o usar '1'
+    let finalClientId = clientId;
+    if (isDirectSale && !finalClientId) {
+      const cf = clients.find(c => c.name?.toLowerCase().includes('consumidor final') || c.id === 1 || String(c.id) === '1');
+      finalClientId = cf ? String(cf.id) : '1';
     }
+
+    if (!finalClientId) { toast.error('Selecciona un cliente'); return; }
+
+    const total = cart.reduce((s, c) => s + c.lineTotal, 0);
+    if (receivedAmount < total) {
+      toast.error(`Pago insuficiente: faltan ${formatCOP(total - receivedAmount)}`); return;
+    }
+
     try {
       setCreating(true);
-      // Crear directamente como COMPLETED (venta en tienda = inmediata)
       const res = await createSale({
-        clientId: Number(clientId),
-        notes: notes.trim() || 'Venta en tienda',
+        clientId: Number(finalClientId),
+        notes: notes.trim() || 'Venta en tienda (POS)',
         status: 'COMPLETED',
         items: cart.map(c => ({ productId: c.productId, quantity: c.quantity, unitPrice: c.unitPrice })),
       });
       if (res.success) {
-        toast.success('Venta registrada correctamente');
+        toast.success('Venta registrada y completada correctamente');
         await load();
         setView('list');
-        setClientId(''); setNotes(''); setCart([]);
+        setClientId(''); setNotes(''); setCart([]); setReceivedAmount(0);
       }
     } catch (err: any) { toast.error(err?.message || 'Error al registrar la venta'); }
     finally { setCreating(false); }
   };
 
-  // ── Vista: Registrar venta en tienda ───────────────────────────────────────
+  // ── Vista: Registrar venta en tienda (POS Compacto) ────────────────────────
   if (view === 'create') {
+    const total = cart.reduce((sum, item) => sum + item.lineTotal, 0);
+
     return (
-      <div className="flex flex-col items-center justify-center py-6 px-4">
-        <div className="w-full max-w-lg mb-2">
-          <Button variant="ghost" size="sm" onClick={() => { setView('list'); setClientId(''); setNotes(''); setCart([]); }} className="text-muted-foreground -ml-2">
-            <ChevronLeft className="h-4 w-4 mr-1" /> Volver al historial
-          </Button>
-        </div>
-        <div className="w-full max-w-lg border rounded-xl shadow-sm bg-card overflow-hidden">
-          <div className="bg-primary/5 border-b px-4 py-3 flex items-center gap-3">
-            <div className="flex h-8 w-8 items-center justify-center rounded-full bg-primary/15 shrink-0">
-              <Store className="h-4 w-4 text-primary" />
-            </div>
-            <div>
-              <p className="font-semibold text-sm">Venta en Tienda</p>
-              <p className="text-xs text-muted-foreground">Se registra y completa inmediatamente · Los campos con * son obligatorios</p>
-            </div>
+      <div className="h-[calc(100vh-100px)] p-4 bg-[#f8fafc]">
+        <div className="flex items-center justify-between mb-4">
+          <div className="flex items-center gap-3">
+            <AntButton
+              icon={<ChevronLeft className="h-4 w-4" />}
+              onClick={() => setView('list')}
+              className="border-none shadow-none bg-white hover:bg-slate-100"
+            />
+            <Typography.Title level={4} style={{ margin: 0, fontWeight: 900, color: '#1e293b' }}>
+              NUEVA VENTA POS
+            </Typography.Title>
           </div>
-          <div className="px-4 py-4 space-y-4">
-            {/* Cliente */}
-            <div className="space-y-1">
-              <Label className="text-xs font-medium">Cliente <span className="text-destructive">*</span></Label>
-              <Select value={clientId} onValueChange={setClientId}>
-                <SelectTrigger className="h-9 text-sm shadow-sm"><SelectValue placeholder="Seleccionar cliente..." /></SelectTrigger>
-                <SelectContent>
-                  {/* Opción para cliente no registrado */}
-                  {clients.find((c: any) => c.name === 'Consumidor Final') && (
-                    <SelectItem
-                      value={String(clients.find((c: any) => c.name === 'Consumidor Final')!.id)}
-                      className="text-sm font-medium text-muted-foreground border-b mb-1">
-                      👤 Cliente no registrado (Consumidor Final)
-                    </SelectItem>
+          <div className="flex items-center gap-4 bg-white px-4 py-2 rounded-2xl shadow-sm border border-slate-100">
+            <Typography.Text strong className="text-slate-400 text-[10px] uppercase tracking-widest">Estado Caja</Typography.Text>
+            <AntBadge status="processing" text={<span className="font-black text-primary text-[10px] uppercase">Abierta</span>} />
+          </div>
+        </div>
+
+        <Row gutter={[16, 16]} className="h-[calc(100%-60px)]">
+          {/* LADO IZQUIERDO: BÚSQUEDA Y SELECCIÓN RÁPIDA */}
+          <Col span={14} className="h-full flex flex-col gap-4 overflow-hidden">
+            <AntCard className="rounded-[1.5rem] shadow-sm border-none overflow-hidden shrink-0">
+              <div className="p-4 space-y-4">
+                <Typography.Text strong className="text-[10px] text-slate-400 uppercase tracking-widest flex items-center gap-2">
+                  <Search className="h-3 w-3 text-primary" /> Búsqueda de Productos
+                </Typography.Text>
+
+                <div className="flex gap-3 items-end">
+                  <div className="flex-1">
+                    <Typography.Text className="text-[10px] font-bold text-slate-500 mb-1.5 block">Producto (Nombre o SKU)</Typography.Text>
+                    <AntSelect
+                      showSearch
+                      placeholder="Escribe para buscar productos..."
+                      className="w-full h-12"
+                      optionFilterProp="children"
+                      value={tempProduct?.id}
+                      onChange={(id) => {
+                        const product = products.find(p => p.id === id);
+                        if (product) setTempProduct(product);
+                      }}
+                      filterOption={(input, option) =>
+                        (option?.label ?? '').toLowerCase().includes(input.toLowerCase())
+                      }
+                      options={products.filter(p => p.isActive).map(p => ({
+                        value: p.id,
+                        label: `${p.name} - ${p.sku || 'S/S'} (${formatCOP(Number(p.price))})`,
+                      }))}
+                      suffixIcon={<Search className="h-4 w-4 text-slate-300" />}
+                    />
+                  </div>
+                  <div className="w-24">
+                    <Typography.Text className="text-[10px] font-bold text-slate-500 mb-1.5 block">Cant.</Typography.Text>
+                    <InputNumber
+                      min={1}
+                      value={tempQuantity}
+                      onChange={val => setTempQuantity(Number(val))}
+                      className="w-full h-12 flex items-center rounded-xl bg-slate-50 border-none font-black"
+                    />
+                  </div>
+                  <AntButton
+                    type="primary"
+                    className="h-12 px-6 rounded-xl font-black bg-primary border-none shadow-lg shadow-primary/20"
+                    icon={<Plus className="h-4 w-4" />}
+                    onClick={() => {
+                      if (tempProduct) {
+                        addToCart(tempProduct, tempQuantity);
+                        setTempProduct(null);
+                        setTempQuantity(1);
+                        toast.success('Producto añadido');
+                      } else {
+                        toast.error('Selecciona un producto primero');
+                      }
+                    }}
+                  >
+                    AGREGAR
+                  </AntButton>
+                </div>
+              </div>
+            </AntCard>
+
+            <AntCard className="rounded-[1.5rem] shadow-sm border-none flex-1 overflow-hidden flex flex-col">
+              <div className="p-4 border-b border-slate-50 shrink-0">
+                <Typography.Text strong className="text-[10px] text-slate-400 uppercase tracking-widest flex items-center gap-2">
+                  <Package className="h-3 w-3 text-primary" /> Sugerencias / Frecuentes
+                </Typography.Text>
+              </div>
+              <div className="flex-1 overflow-y-auto p-4 scrollbar-thin">
+                <AntTable
+                  dataSource={products.filter(p => p.isActive).slice(0, 10)}
+                  rowKey="id"
+                  pagination={false}
+                  size="small"
+                  className="rounded-lg overflow-hidden"
+                  columns={[
+                    {
+                      title: <span className="text-[10px] font-black uppercase text-slate-400">Producto</span>,
+                      dataIndex: 'name',
+                      render: (name, p) => (
+                        <div className="flex flex-col">
+                          <span className="font-black text-slate-700 text-xs">{name}</span>
+                          <span className="text-[9px] text-slate-400 font-bold">{p.sku || 'S/S'}</span>
+                        </div>
+                      )
+                    },
+                    {
+                      title: <span className="text-[10px] font-black uppercase text-slate-400">Stock</span>,
+                      dataIndex: 'stock',
+                      width: 80,
+                      render: (stock) => <AntBadge count={stock} overflowCount={999} style={{ backgroundColor: stock > 5 ? '#10b981' : '#ef4444', fontSize: '9px' }} />
+                    },
+                    {
+                      title: <span className="text-[10px] font-black uppercase text-slate-400">Precio</span>,
+                      dataIndex: 'price',
+                      render: (price) => <span className="font-black text-primary text-xs">{formatCOP(Number(price))}</span>
+                    },
+                    {
+                      title: '',
+                      width: 50,
+                      render: (_, p) => (
+                        <AntButton
+                          type="text"
+                          icon={<Plus className="h-4 w-4 text-primary" />}
+                          className="hover:bg-primary/5"
+                          onClick={() => addToCart(p)}
+                        />
+                      )
+                    }
+                  ]}
+                />
+              </div>
+            </AntCard>
+          </Col>
+
+          {/* LADO DERECHO: VENTA ACTUAL / CARRITO */}
+          <Col span={10} className="h-full overflow-hidden">
+            <AntCard className="rounded-[1.5rem] shadow-xl border-none h-full flex flex-col overflow-hidden bg-white">
+              <div className="p-4 border-b border-slate-50 shrink-0 bg-slate-50/30">
+                <div className="flex items-center justify-between mb-4">
+                  <Typography.Text strong className="text-[10px] text-slate-400 uppercase tracking-widest flex items-center gap-2">
+                    <ShoppingCart className="h-3 w-3 text-primary" /> Carrito de Venta
+                  </Typography.Text>
+                  <AntButton
+                    danger
+                    type="text"
+                    size="small"
+                    icon={<X className="h-3 w-3" />}
+                    onClick={() => setCart([])}
+                    className="text-[9px] font-black uppercase"
+                  >
+                    Vaciar
+                  </AntButton>
+                </div>
+
+                <div className="space-y-3">
+                  <Typography.Text strong className="text-[10px] text-slate-400 uppercase tracking-widest flex items-center gap-2">
+                    <User className="h-3 w-3 text-primary" /> Cliente
+                  </Typography.Text>
+                  <div className="flex items-center justify-between mb-2">
+                    <span className={cn("text-[9px] font-bold uppercase", isDirectSale ? "text-primary" : "text-slate-400")}>Venta Directa</span>
+                    <AntSwitch size="small" checked={isDirectSale} onChange={(val) => {
+                      setIsDirectSale(val);
+                      if (val) {
+                        const cf = clients.find(c => c.name?.toLowerCase().includes('consumidor final') || c.id === 1 || String(c.id) === '1');
+                        setClientId(cf ? String(cf.id) : '1');
+                      } else {
+                        setClientId(''); // Limpiar selección al desactivar venta directa
+                      }
+                    }} />
+                  </div>
+                  {!isDirectSale && (
+                    <Popover>
+                      <PopoverTrigger asChild>
+                        <AntButton
+                          className="w-full justify-between h-12 bg-slate-50 border-none rounded-xl text-xs font-black text-slate-700 px-4"
+                        >
+                          <div className="flex items-center gap-2 truncate">
+                            <User className="h-4 w-4 text-primary shrink-0" />
+                            <span className="truncate">
+                              {clientId
+                                ? clients.find(c => String(c.id) === String(clientId))?.name || "Seleccionar Cliente"
+                                : "Seleccionar Cliente"}
+                            </span>
+                          </div>
+                          <ChevronsUpDown className="h-4 w-4 shrink-0 opacity-50" />
+                        </AntButton>
+                      </PopoverTrigger>
+                      <PopoverContent className="w-[300px] p-0 rounded-2xl border-none shadow-2xl overflow-hidden" align="start">
+                        <Command className="rounded-2xl border-none">
+                          <CommandInput placeholder="Buscar por nombre o documento..." className="h-11 border-none focus:ring-0 text-xs font-medium" />
+                          <CommandList className="max-h-[300px] scrollbar-thin">
+                            <CommandEmpty className="py-8 text-center text-[10px] font-black text-slate-400 uppercase tracking-widest">Sin resultados</CommandEmpty>
+                            <CommandGroup>
+                              {clients.filter(c => c.isActive).map((c) => (
+                                <CommandItem
+                                  key={c.id}
+                                  value={`${c.name} ${c.documentNumber || ''}`}
+                                  onSelect={() => setClientId(String(c.id))}
+                                  className="p-3 cursor-pointer rounded-xl hover:bg-slate-50 transition-all border-b border-slate-50/50 last:border-none"
+                                >
+                                  <div className="flex flex-col">
+                                    <span className="font-black text-slate-700 text-sm">{c.name}</span>
+                                    <span className="text-[10px] text-primary font-black uppercase">{c.documentNumber || 'S/D'}</span>
+                                  </div>
+                                </CommandItem>
+                              ))}
+                            </CommandGroup>
+                          </CommandList>
+                        </Command>
+                      </PopoverContent>
+                    </Popover>
                   )}
-                  {clients.filter((c: any) => c.name !== 'Consumidor Final').map((c: any) => (
-                    <SelectItem key={c.id} value={String(c.id)} className="text-sm">{c.name}</SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-              {clientId && clients.find((c: any) => String(c.id) === clientId)?.name === 'Consumidor Final' && (
-                <p className="text-xs text-muted-foreground flex items-center gap-1 mt-0.5">
-                  ℹ️ La venta se registrará como "Consumidor Final"
-                </p>
-              )}
-            </div>
-            {/* Notas */}
-            <div className="space-y-1">
-              <Label className="text-xs font-medium">Notas <span className="text-muted-foreground font-normal">(opcional)</span></Label>
-              <Textarea value={notes} onChange={e => setNotes(e.target.value)} placeholder="Observaciones de la venta..." rows={2} className="text-sm resize-none shadow-sm" />
-            </div>
-            <Separator />
-            {/* Productos */}
-            <div className="space-y-2">
-              <Label className="text-xs font-medium">Productos <span className="text-destructive">*</span></Label>
-              <div className="relative">
-                <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground pointer-events-none z-10" />
-                <Input value={productSearch} onChange={e => setProductSearch(e.target.value)}
-                  placeholder="Buscar por nombre o SKU..." style={{ paddingLeft: '2.25rem' }} className="h-9 text-sm shadow-sm" />
+                </div>
               </div>
-              <div className="border rounded-lg divide-y max-h-44 overflow-y-auto shadow-sm">
-                {filteredProducts.length === 0 ? (
-                  <p className="text-xs text-muted-foreground text-center py-3">Sin resultados</p>
-                ) : filteredProducts.map(p => {
-                  const inCart = !!cart.find(c => c.productId === p.id);
-                  return (
-                    <button key={p.id} type="button" onClick={() => !inCart && addToCart(p)} disabled={inCart || p.stock === 0}
-                      className="w-full flex items-center gap-3 px-3 py-2 hover:bg-muted/50 text-left transition-colors disabled:opacity-40 disabled:cursor-not-allowed">
-                      {p.image ? <img src={p.image} alt={p.name} className="w-8 h-8 rounded object-cover shrink-0" />
-                        : <div className="w-8 h-8 rounded bg-muted flex items-center justify-center shrink-0"><Package className="h-4 w-4 text-muted-foreground" /></div>}
-                      <div className="flex-1 min-w-0">
-                        <p className="text-sm font-medium truncate">{p.name}</p>
-                        <p className="text-xs text-muted-foreground">{p.sku || 'Sin SKU'} · Stock: {p.stock}</p>
-                      </div>
-                      <span className="text-xs font-medium text-muted-foreground shrink-0">{formatCOP(Number(p.price))}</span>
-                      {inCart && <Badge variant="secondary" className="text-xs shrink-0">Agregado</Badge>}
-                      {p.stock === 0 && <Badge variant="destructive" className="text-xs shrink-0">Agotado</Badge>}
-                    </button>
-                  );
-                })}
+
+              <div className="flex-1 overflow-y-auto p-4 scrollbar-thin">
+                <AntTable
+                  dataSource={cart}
+                  rowKey="productId"
+                  pagination={false}
+                  size="small"
+                  className="compact-table"
+                  columns={[
+                    {
+                      title: <span className="text-[9px] font-black uppercase text-slate-400">Ítem</span>,
+                      dataIndex: 'productName',
+                      render: (name) => <span className="font-bold text-slate-700 text-[11px] truncate">{name}</span>
+                    },
+                    {
+                      title: <span className="text-[9px] font-black uppercase text-slate-400 text-center">Cant.</span>,
+                      dataIndex: 'quantity',
+                      align: 'center',
+                      render: (q, record) => (
+                        <div className="flex items-center justify-center gap-1">
+                          <AntButton size="small" type="text" onClick={() => updateCartItem(record.productId, 'quantity', q - 1)}>-</AntButton>
+                          <span className="font-black text-slate-700 text-xs">{q}</span>
+                          <AntButton size="small" type="text" onClick={() => updateCartItem(record.productId, 'quantity', q + 1)}>+</AntButton>
+                        </div>
+                      )
+                    },
+                    {
+                      title: <span className="text-[9px] font-black uppercase text-slate-400 text-right">Subtotal</span>,
+                      dataIndex: 'lineTotal',
+                      align: 'right',
+                      render: (t) => <span className="font-black text-slate-800 text-[11px]">{formatCOP(t)}</span>
+                    },
+                    {
+                      title: '',
+                      width: 40,
+                      render: (_, record) => (
+                        <AntButton type="text" danger icon={<X className="h-3 w-3" />} onClick={() => removeFromCart(record.productId)} />
+                      )
+                    }
+                  ]}
+                />
               </div>
-            </div>
-            {/* Carrito */}
-            {cart.length > 0 && (
-              <>
-                <Separator />
-                <div className="space-y-2">
-                  <Label className="text-xs font-medium">Productos seleccionados ({cart.length})</Label>
-                  {cart.map(item => (
-                    <div key={item.productId} className="rounded-lg border shadow-sm bg-muted/20 px-3 py-2.5 space-y-2">
-                      <div className="flex items-center justify-between">
-                        <p className="text-sm font-medium truncate flex-1">{item.productName}</p>
-                        <Button variant="ghost" size="icon" className="h-6 w-6 shrink-0 ml-2" onClick={() => setCart(p => p.filter(c => c.productId !== item.productId))}>
-                          <X className="h-3.5 w-3.5 text-destructive" />
-                        </Button>
-                      </div>
-                      <div className="grid grid-cols-2 gap-2">
-                        <div className="space-y-1">
-                          <Label className="text-xs text-muted-foreground">Cantidad <span className="text-destructive">*</span></Label>
-                          <Input type="number" min={1} value={item.quantity}
-                            onChange={e => updateCartItem(item.productId, 'quantity', Math.max(1, Number(e.target.value)))}
-                            className="h-8 text-sm shadow-sm" />
-                        </div>
-                        <div className="space-y-1">
-                          <Label className="text-xs text-muted-foreground">Precio unitario <span className="text-destructive">*</span></Label>
-                          <Input type="number" min={0} step={100} value={item.unitPrice}
-                            onChange={e => updateCartItem(item.productId, 'unitPrice', Number(e.target.value))}
-                            className="h-8 text-sm shadow-sm" />
-                        </div>
-                      </div>
-                      <div className="flex justify-between text-xs text-muted-foreground">
-                        <span>Subtotal</span>
-                        <span className="font-semibold text-foreground">{formatCOP(item.lineTotal)}</span>
-                      </div>
+
+              <div className="p-4 bg-slate-50/50 border-t border-slate-100 shrink-0 space-y-4">
+                <div className="grid grid-cols-2 gap-3">
+                  <div className="bg-white rounded-xl p-3 shadow-sm border border-slate-100 flex flex-col justify-between">
+                    <Typography.Text strong className="text-[8px] font-black text-slate-400 uppercase mb-1 block tracking-widest">Pago Recibido</Typography.Text>
+                    <div className="flex items-center">
+                      <span className="text-sm font-black text-primary mr-1">$</span>
+                      <InputNumber
+                        value={receivedAmount}
+                        onChange={val => setReceivedAmount(Number(val))}
+                        className="w-full font-black text-lg border-none shadow-none bg-transparent h-auto p-0"
+                        controls={false}
+                        variant="borderless"
+                        formatter={value => `$ ${value}`.replace(/\B(?=(\d{3})+(?!\d))/g, ',')}
+                        parser={value => (value?.replace(/\$\s?|(,*)/g, '') || '') as any}
+                      />
                     </div>
-                  ))}
-                  <div className="flex justify-between items-center rounded-lg bg-primary/5 border px-3 py-2.5">
-                    <span className="text-sm font-semibold">Total de la venta</span>
-                    <span className="text-base font-bold text-primary">{formatCOP(cartTotal)}</span>
+                  </div>
+                  <div
+                    className="rounded-xl p-3 flex flex-col justify-between shadow-sm border transition-colors"
+                    style={{
+                      backgroundColor: receivedAmount >= total && total > 0 ? '#10b981' : '#f1f5f9',
+                      borderColor: receivedAmount >= total && total > 0 ? '#059669' : '#e2e8f0'
+                    }}
+                  >
+                    <Typography.Text
+                      strong
+                      className="text-[8px] font-black uppercase mb-1 block text-right"
+                      style={{ color: receivedAmount >= total && total > 0 ? '#ecfdf5' : '#94a3b8' }}
+                    >
+                      Cambio
+                    </Typography.Text>
+                    <div
+                      className="text-right text-base font-black tracking-tighter"
+                      style={{ color: receivedAmount >= total && total > 0 ? 'white' : '#475569' }}
+                    >
+                      {formatCOP(Math.max(0, receivedAmount - total))}
+                    </div>
                   </div>
                 </div>
-              </>
-            )}
-            <div className="flex gap-2 pt-1">
-              <Button onClick={handleCreateSale} disabled={creating || cart.length === 0 || !clientId} className="flex-1 h-9 text-sm">
-                {creating ? <><RefreshCw className="h-3.5 w-3.5 mr-1.5 animate-spin" />Registrando...</> : <><CheckCircle className="h-3.5 w-3.5 mr-1.5" />Registrar Venta</>}
-              </Button>
-              <Button variant="outline" onClick={() => { setView('list'); setClientId(''); setNotes(''); setCart([]); }} className="flex-1 h-9 text-sm">Cancelar</Button>
-            </div>
-          </div>
-        </div>
+
+                <div
+                  className="flex items-center justify-between p-4 rounded-2xl shadow-lg border"
+                  style={{ backgroundColor: '#1e293b', borderColor: '#334155' }}
+                >
+                  <span className="text-[10px] font-black uppercase tracking-widest" style={{ color: '#94a3b8' }}>Total a Pagar</span>
+                  <span className="text-2xl font-black" style={{ color: '#4ade80' }}>
+                    {formatCOP(Number(total) || 0)}
+                  </span>
+                </div>
+
+                <AntButton
+                  type="primary"
+                  block
+                  className="h-14 text-xs font-black uppercase rounded-2xl bg-primary border-none shadow-lg shadow-primary/20 flex items-center justify-center gap-2"
+                  disabled={creating || cart.length === 0 || (isDirectSale ? false : !clientId) || receivedAmount < total}
+                  onClick={handleCreateSale}
+                >
+                  {creating ? <RefreshCw className="h-5 w-5 animate-spin" /> : <CheckCircle className="h-5 w-5" />}
+                  FINALIZAR VENTA
+                </AntButton>
+              </div>
+            </AntCard>
+          </Col>
+        </Row>
       </div>
     );
   }
@@ -433,162 +687,128 @@ export function SalesManagement({ user }: { user?: { role: string; permissions: 
   };
 
   return (
-    <div className="space-y-5">
+    <div className="space-y-6">
       {/* Título */}
       <div className="flex items-center justify-between">
-        <div>
-          <h1 className="text-xl font-semibold flex items-center gap-2">
-            <DollarSign className="h-5 w-5 text-primary" /> Ventas
-          </h1>
-          <p className="text-sm text-muted-foreground mt-0.5">Historial de ventas completadas</p>
-        </div>
+        <h1 className="text-xl font-semibold flex items-center gap-2">
+          <DollarSign className="h-5 w-5 text-primary" /> Ventas
+        </h1>
         <div className="flex items-center gap-2">
           <Button variant="outline" size="sm" onClick={load} disabled={loading}>
             <RefreshCw className={`h-4 w-4 ${loading ? 'animate-spin' : ''}`} />
           </Button>
           {canSell && (
-            <Button size="sm" onClick={() => setView('create')}>
+            <Button size="sm" onClick={() => { setView('create'); setClientId(''); }}>
               <Store className="h-4 w-4 mr-1.5" /> Venta en Tienda
             </Button>
           )}
         </div>
       </div>
 
-      {/* Estadísticas */}
-      <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
-        <Card>
-          <CardContent className="p-4 flex items-center gap-3">
-            <div className="flex h-10 w-10 items-center justify-center rounded-full bg-green-100 shrink-0">
-              <CheckCircle className="h-5 w-5 text-green-600" />
-            </div>
-            <div>
-              <p className="text-2xl font-bold">{completed.length}</p>
-              <p className="text-xs text-muted-foreground">Ventas completadas</p>
-            </div>
-          </CardContent>
-        </Card>
-        <Card>
-          <CardContent className="p-4 flex items-center gap-3">
-            <div className="flex h-10 w-10 items-center justify-center rounded-full bg-primary/10 shrink-0">
-              <DollarSign className="h-5 w-5 text-primary" />
-            </div>
-            <div>
-              <p className="text-2xl font-bold">{formatCOP(totalRevenue)}</p>
-              <p className="text-xs text-muted-foreground">Ingresos totales</p>
-            </div>
-          </CardContent>
-        </Card>
-        <Card>
-          <CardContent className="p-4 flex items-center gap-3">
-            <div className="flex h-10 w-10 items-center justify-center rounded-full bg-blue-100 shrink-0">
-              <Package className="h-5 w-5 text-blue-600" />
-            </div>
-            <div>
-              <p className="text-2xl font-bold">{totalItems}</p>
-              <p className="text-xs text-muted-foreground">Unidades vendidas</p>
-            </div>
-          </CardContent>
-        </Card>
-      </div>
-
-      {/* Filtros */}
-      <div className="flex gap-3">
-        <div className="relative flex-1">
-          <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground pointer-events-none z-10" />
-          <Input placeholder="Buscar por cliente o número de venta..."
-            value={searchTerm} onChange={e => { setSearchTerm(e.target.value); setCurrentPage(1); }}
-            style={{ paddingLeft: '2.25rem' }} />
-        </div>
-        <Select value={statusFilter} onValueChange={v => { setStatusFilter(v); setCurrentPage(1); }}>
-          <SelectTrigger className="w-44"><SelectValue /></SelectTrigger>
-          <SelectContent>
-            <SelectItem value="COMPLETED">Completadas</SelectItem>
-            <SelectItem value="CANCELLED">Canceladas</SelectItem>
-            <SelectItem value="ANNULED">Anuladas</SelectItem>
-            <SelectItem value="all">Todas (sin pendientes)</SelectItem>
-          </SelectContent>
-        </Select>
-      </div>
-
-      {/* Tabla */}
-      <Card>
-        <CardContent className="p-0">
-          <div className="flex items-center justify-between px-4 py-3 border-b">
-            <span className="text-sm font-medium">Historial de Ventas</span>
-            <span className="text-xs text-muted-foreground">{filtered.length} venta{filtered.length !== 1 ? 's' : ''}</span>
+      {/* Estadísticas — 4 tarjetas en fila */}
+      <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
+        <div className="rounded-xl border bg-card p-5 flex items-center gap-4">
+          <div className="flex h-11 w-11 items-center justify-center rounded-xl bg-green-100 shrink-0">
+            <CheckCircle className="h-5 w-5 text-green-600" />
           </div>
-          {loading ? (
-            <div className="flex items-center justify-center py-14 gap-2 text-muted-foreground">
-              <RefreshCw className="h-5 w-5 animate-spin" /><span className="text-sm">Cargando...</span>
-            </div>
-          ) : (
-            <Table>
-              <TableHeader>
-                <TableRow className="hover:bg-transparent">
-                  <TableHead className="pl-4"># Venta</TableHead>
-                  <TableHead>Cliente</TableHead>
-                  <TableHead>Estado</TableHead>
-                  <TableHead className="text-right">Total</TableHead>
-                  <TableHead className="text-right pr-4">Acciones</TableHead>
-                </TableRow>
-              </TableHeader>
-              <TableBody>
-                {paginated.length === 0 ? (
-                  <TableRow>
-                    <TableCell colSpan={5} className="text-center py-10 text-muted-foreground text-sm">
-                      No se encontraron ventas
-                    </TableCell>
-                  </TableRow>
-                ) : paginated.map(s => (
-                  <TableRow key={s.id}>
-                    <TableCell className="pl-4 font-mono text-sm font-medium">#{s.id}</TableCell>
-                    <TableCell>
-                      <div className="flex items-center gap-1.5">
-                        <Users className="h-3.5 w-3.5 text-muted-foreground shrink-0" />
-                        <div>
-                          <p className="text-sm">{s.client.name}</p>
-                          {s.client.email && <p className="text-xs text-muted-foreground">{s.client.email}</p>}
-                        </div>
-                      </div>
-                    </TableCell>
-                    <TableCell>
-                      <Badge className={`${STATUS_COLORS[s.status] || 'bg-gray-100 text-gray-800'} text-xs`}>
-                        {STATUS_LABELS[s.status] || s.status}
-                      </Badge>
-                    </TableCell>
-                    <TableCell className="text-right font-medium text-sm">
-                      {formatCOP(Number(s.totalPrice))}
-                    </TableCell>
-                    <TableCell className="text-right pr-4">
-                      <div className="flex items-center justify-end gap-1">
-                        <Button variant="ghost" size="icon" className="h-8 w-8" onClick={() => openDetail(s)} title="Ver detalle">
-                          <Eye className="h-4 w-4 text-muted-foreground" />
-                        </Button>
-                        <Button variant="ghost" size="icon" className="h-8 w-8" onClick={() => openPdfModal(s)} title="Descargar PDF">
-                          <Download className="h-4 w-4 text-muted-foreground" />
-                        </Button>
-                      </div>
-                    </TableCell>
-                  </TableRow>
-                ))}
-              </TableBody>
-            </Table>
-          )}
-          {totalPages > 1 && (
-            <div className="flex items-center justify-between px-4 py-3 border-t">
-              <p className="text-xs text-muted-foreground">Página {currentPage} de {totalPages}</p>
-              <div className="flex gap-1">
-                <Button variant="outline" size="sm" onClick={() => setCurrentPage(p => Math.max(1, p - 1))} disabled={currentPage === 1}>
-                  <ChevronLeft className="h-4 w-4" />
-                </Button>
-                <Button variant="outline" size="sm" onClick={() => setCurrentPage(p => Math.min(totalPages, p + 1))} disabled={currentPage === totalPages}>
-                  <ChevronRight className="h-4 w-4" />
-                </Button>
+          <div>
+            <p className="text-2xl font-bold">{completed.length}</p>
+            <p className="text-xs text-muted-foreground mt-0.5">Completadas</p>
+          </div>
+        </div>
+        <div className="rounded-xl border bg-card p-5 flex items-center gap-4">
+          <div className="flex h-11 w-11 items-center justify-center rounded-xl bg-primary/10 shrink-0">
+            <DollarSign className="h-5 w-5 text-primary" />
+          </div>
+          <div className="min-w-0">
+            <p className="text-2xl font-bold truncate">{formatCOP(totalRevenue)}</p>
+            <p className="text-xs text-muted-foreground mt-0.5">Ingresos</p>
+          </div>
+        </div>
+        <div className="rounded-xl border bg-card p-5 flex items-center gap-4">
+          <div className="flex h-11 w-11 items-center justify-center rounded-xl bg-blue-100 shrink-0">
+            <Package className="h-5 w-5 text-blue-600" />
+          </div>
+          <div>
+            <p className="text-2xl font-bold">{totalItems}</p>
+            <p className="text-xs text-muted-foreground mt-0.5">Unidades vendidas</p>
+          </div>
+        </div>
+        <div className="rounded-xl border bg-card p-5 flex items-center gap-4">
+          <div className="flex h-11 w-11 items-center justify-center rounded-xl bg-orange-100 shrink-0">
+            <FileText className="h-5 w-5 text-orange-600" />
+          </div>
+          <div>
+            <p className="text-2xl font-bold">{sales.length}</p>
+            <p className="text-xs text-muted-foreground mt-0.5">Total ventas</p>
+          </div>
+        </div>
+      </div>
+
+      <DataTable
+        title="Historial de Ventas"
+        description={`Mostrando ${filtered.length} venta${filtered.length !== 1 ? 's' : ''}`}
+        data={dataForTable}
+        columns={[
+          {
+            header: '# Venta',
+            accessor: (s: any) => <span className="font-mono text-sm font-medium">#{s.id}</span>
+          },
+          {
+            header: 'Cliente',
+            accessor: (s: any) => (
+              <div className="flex items-center gap-1.5">
+                <Users className="h-3.5 w-3.5 text-muted-foreground shrink-0" />
+                <div>
+                  <p className="text-sm">{s.client.name}</p>
+                  {s.client.email && <p className="text-xs text-muted-foreground">{s.client.email}</p>}
+                </div>
               </div>
-            </div>
-          )}
-        </CardContent>
-      </Card>
+            )
+          },
+          {
+            header: 'Estado',
+            accessor: (s: any) => (
+              <Badge className={`${STATUS_COLORS[s.status] || 'bg-gray-100 text-gray-800'} text-xs`}>
+                {STATUS_LABELS[s.status] || s.status}
+              </Badge>
+            )
+          },
+          {
+            header: 'Total',
+            accessor: (s: any) => (
+              <span className="font-medium text-sm">{formatCOP(Number(s.totalPrice))}</span>
+            )
+          }
+        ]}
+        searchableKeys={['clientName', 'clientEmail', 'id']}
+        searchPlaceholder="Buscar por cliente o número..."
+        itemsPerPage={ITEMS_PER_PAGE}
+        isLoading={loading}
+        customActions={(sale: any) => (
+          <>
+            <Button variant="ghost" size="icon" className="h-8 w-8" onClick={() => openDetail(sale)} title="Ver detalle">
+              <Eye className="h-4 w-4 text-muted-foreground" />
+            </Button>
+            <Button variant="ghost" size="icon" className="h-8 w-8" onClick={() => openPdfModal(sale)} title="Descargar PDF">
+              <Download className="h-4 w-4 text-muted-foreground" />
+            </Button>
+          </>
+        )}
+        extraFilters={
+          <Select value={statusFilter} onValueChange={setStatusFilter}>
+            <SelectTrigger className="w-44 h-9">
+              <SelectValue placeholder="Estado" />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="COMPLETED">Completadas</SelectItem>
+              <SelectItem value="CANCELLED">Canceladas</SelectItem>
+              <SelectItem value="ANNULED">Anuladas</SelectItem>
+              <SelectItem value="all">Todas (sin pendientes)</SelectItem>
+            </SelectContent>
+          </Select>
+        }
+      />
 
       {/* Modal Detalle */}
       <Dialog open={isDetailOpen} onOpenChange={setIsDetailOpen}>

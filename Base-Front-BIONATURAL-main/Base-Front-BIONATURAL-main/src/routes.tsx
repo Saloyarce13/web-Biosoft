@@ -12,8 +12,7 @@ export interface SidebarItem {
 }
 
 export const SIDEBAR_ITEMS: SidebarItem[] = [
-  // Inicio — todos los empleados/admin
-  { icon: Home,         label: 'Inicio',              id: 'home',       roles: ['Administrador', 'administrador', 'Vendedor', 'vendedor', 'Bodega', 'bodega', 'Contador', 'contador'] },
+
   // Dashboard — solo con permiso reports.view o admin
   { icon: BarChart3,    label: 'Dashboard y Reportes',id: 'dashboard',  roles: ['Administrador', 'administrador'], permission: 'reports.view' },
   // Usuarios — solo con permiso users.view/manage o admin

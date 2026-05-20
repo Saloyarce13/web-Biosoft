@@ -1,32 +1,22 @@
-const router = require('express').Router();
+// src/routes/role.routes.js
+const express = require('express');
+const router = express.Router();
+const roleController = require('../controllers/role.controller');
+const { authenticateToken } = require('../middleware/auth');
 
-const {
-  getAll,
-  getOne,
-  create,
-  update,
-  remove,
-  toggleStatus,
-  assignPermission,
-  removePermission,
-} = require('../controllers/role.controller');
-const { verifyToken, verifyRole } = require('../middlewares/auth.middleware');
-
-router.get('/', verifyToken, getAll);
-router.get('/:id', verifyToken, verifyRole('administrador'), getOne);
-router.post('/', verifyToken, verifyRole('administrador'), create);
-router.put('/:id', verifyToken, verifyRole('administrador'), update);
-router.patch('/:id/status', verifyToken, verifyRole('administrador'), toggleStatus);
-router.delete('/:id', verifyToken, verifyRole('administrador'), remove);
-
-// Asignar/Quitar permisos al rol
-router.post('/:roleId/permissions', verifyToken, verifyRole('administrador'), assignPermission);
-router.delete(
-  '/:roleId/permissions/:permissionId',
-  verifyToken,
-  verifyRole('administrador'),
-  removePermission,
-);
+router.get('/', authenticateToken, roleController.getAll);
+router.get('/:id', authenticateToken, roleController.getOne);
+router.post('/', authenticateToken, roleController.create);
+router.put('/:id', authenticateToken, roleController.update);
+router.delete('/:id', authenticateToken, roleController.remove);
+router.patch('/:id/status', authenticateToken, roleController.toggleStatus);
+router.post('/:id/permissions', authenticateToken, (req, res, next) => {
+  req.params.roleId = req.params.id;
+  next();
+}, roleController.assignPermission);
+router.delete('/:id/permissions/:permissionId', authenticateToken, (req, res, next) => {
+  req.params.roleId = req.params.id;
+  next();
+}, roleController.removePermission);
 
 module.exports = router;
-

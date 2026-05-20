@@ -11,6 +11,11 @@ import { Textarea } from '../../../components/ui/textarea';
 import { toast } from 'sonner';
 import { format, parseISO } from 'date-fns';
 import { es } from 'date-fns/locale';
+
+function formatCOP(n: number) {
+  return new Intl.NumberFormat('es-CO', { style: 'currency', currency: 'COP', minimumFractionDigits: 0 }).format(n);
+}
+
 import { 
   ShoppingCart, 
   Plus, 
