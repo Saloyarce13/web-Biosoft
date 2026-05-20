@@ -1,13 +1,15 @@
 const { z } = require('zod');
-const { sendOrderCancelledEmail } = require('../services/email.service');
+const { sendOrderCancelledEmail, sendOrderReadyEmail } = require('../services/email.service');
+const { checkAndCancelLowStockOrders } = require('../lib/stockChecker');
 const prisma = require('../lib/prisma');
 const { validate } = require('../lib/validate');
 
 const SaleStatus = {
   REGISTERED: 'REGISTERED',
-  COMPLETED: 'COMPLETED',
-  CANCELLED: 'CANCELLED',
-  ANNULED: 'ANNULED',
+  READY:      'READY',       // listo para recoger en tienda
+  COMPLETED:  'COMPLETED',
+  CANCELLED:  'CANCELLED',
+  ANNULED:    'ANNULED',
 };
 
 const moneyRound2 = (value) => {
@@ -46,7 +48,7 @@ const removeItemsSchema = z.object({
 });
 
 const changeStatusSchema = z.object({
-  status: z.enum([SaleStatus.REGISTERED, SaleStatus.COMPLETED, SaleStatus.CANCELLED, SaleStatus.ANNULED]),
+  status: z.enum([SaleStatus.REGISTERED, SaleStatus.READY, SaleStatus.COMPLETED, SaleStatus.CANCELLED, SaleStatus.ANNULED]),
 });
 
 const setClientSchema = z.object({
@@ -72,6 +74,12 @@ const create = async (req, res) => {
     const { clientId, employeeId, notes, status, items } = parsed.data;
     const saleStatus = status ?? SaleStatus.REGISTERED;
 
+    // Validar que no haya productos duplicados en el mismo pedido
+    const uniqueProductIds = new Set(items.map((i) => i.productId));
+    if (uniqueProductIds.size !== items.length) {
+      return res.status(400).json({ success: false, message: 'No puedes agregar el mismo producto dos veces en un pedido' });
+    }
+
     const client = await prisma.client.findUnique({ where: { id: clientId }, select: { id: true, isActive: true } });
     if (!client || !client.isActive) return res.status(400).json({ success: false, message: 'El cliente no existe o está inactivo' });
 
@@ -83,7 +91,7 @@ const create = async (req, res) => {
     const productIds = items.map((i) => i.productId);
     const products = await prisma.product.findMany({
       where: { id: { in: productIds }, isActive: true },
-      select: { id: true, price: true, stock: true },
+      select: { id: true, price: true, stock: true, name: true },
     });
     if (products.length !== new Set(productIds).size) {
       return res.status(400).json({ success: false, message: 'Uno o más productos no existen o están inactivos' });
@@ -122,17 +130,21 @@ const create = async (req, res) => {
         })),
       });
 
-      if (saleStatus === SaleStatus.COMPLETED) {
+      // SIEMPRE DESCONTAR STOCK AL CREAR (si no es cancelado de entrada)
+      if (saleStatus !== SaleStatus.CANCELLED && saleStatus !== SaleStatus.ANNULED) {
         // Verificar stock suficiente y descontar
         const productStates = await tx.product.findMany({
           where: { id: { in: productIds } },
-          select: { id: true, stock: true },
+          select: { id: true, stock: true, name: true },
         });
-        const stockById = new Map(productStates.map((p) => [p.id, p.stock]));
+        const stockById = new Map(productStates.map((p) => [p.id, p]));
 
         for (const it of normalizedItems) {
-          const stock = stockById.get(it.productId) ?? 0;
-          if (stock < it.quantity) throw new Error(`Stock insuficiente para vender: producto ${it.productId} (stock ${stock})`);
+          const prod = stockById.get(it.productId);
+          const stock = prod?.stock ?? 0;
+          if (stock < it.quantity) {
+            throw new Error(`Stock insuficiente para "${prod?.name || it.productId}": disponible ${stock}, requerido ${it.quantity}`);
+          }
         }
 
         await Promise.all(
@@ -150,7 +162,7 @@ const create = async (req, res) => {
             amount: it.lineTotal,
             userId,
             saleId: sale.id,
-            metadata: { productId: it.productId, quantity: it.quantity },
+            metadata: { productId: it.productId, quantity: it.quantity, reason: 'Sale creation' },
           })),
         });
       }
@@ -181,7 +193,7 @@ const list = async (req, res) => {
     if (clientId) where.clientId = Number(clientId);
 
     // Si es cliente (rol user/cliente), filtrar solo sus propias ventas
-    const userRole = (req.user?.role || '').toLowerCase();
+    const userRole = (typeof req.user?.role === 'object' ? req.user?.role?.name : req.user?.role || '').toLowerCase();
     if (userRole === 'user' || userRole === 'cliente') {
       const client = await prisma.client.findFirst({
         where: { email: req.user.email },
@@ -268,6 +280,8 @@ const addItems = async (req, res) => {
       return res.status(409).json({ success: false, message: `No se pueden agregar productos a un pedido ${sale.status}. Solo pedidos REGISTERED pueden modificarse.` });
     }
 
+    const userId = getReqUserId(req);
+
     // Validar que las cantidades sean positivas
     for (const it of items) {
       if (it.quantity <= 0) return res.status(400).json({ success: false, message: 'Las cantidades deben ser mayores a 0' });
@@ -277,7 +291,7 @@ const addItems = async (req, res) => {
     const productIds = items.map((i) => i.productId);
     const products = await prisma.product.findMany({
       where: { id: { in: productIds }, isActive: true },
-      select: { id: true, price: true },
+      select: { id: true, price: true, stock: true, name: true },
     });
 
     if (products.length !== new Set(productIds).size) {
@@ -294,6 +308,10 @@ const addItems = async (req, res) => {
 
     await prisma.$transaction(async (tx) => {
       for (const it of normalizedItems) {
+        // Verificar stock para el nuevo item
+        const prod = productById.get(it.productId);
+        if (prod.stock < it.quantity) throw new Error(`Stock insuficiente para "${prod.name}": disponible ${prod.stock}, requerido ${it.quantity}`);
+
         const existing = await tx.saleItem.findUnique({
           where: { saleId_productId: { saleId, productId: it.productId } },
         });
@@ -316,6 +334,22 @@ const addItems = async (req, res) => {
             },
           });
         }
+
+        // DESCONTAR STOCK (porque ahora descontamos al crear)
+        await tx.product.update({
+          where: { id: it.productId },
+          data: { stock: { decrement: it.quantity } },
+        });
+
+        await tx.transaction.create({
+          data: {
+            type: 'STOCK_OUT',
+            amount: it.lineTotal,
+            userId,
+            saleId,
+            metadata: { productId: it.productId, quantity: it.quantity, reason: 'Item added to sale' },
+          }
+        });
       }
 
       const allItems = await tx.saleItem.findMany({ where: { saleId }, select: { lineTotal: true } });
@@ -347,7 +381,32 @@ const removeItems = async (req, res) => {
       return res.status(409).json({ success: false, message: `No se pueden eliminar productos de un pedido ${sale.status}. Solo pedidos REGISTERED pueden modificarse.` });
     }
 
+    const userId = getReqUserId(req);
+
     await prisma.$transaction(async (tx) => {
+      const itemsToRemove = await tx.saleItem.findMany({
+        where: { saleId, productId: { in: productIds } },
+        select: { productId: true, quantity: true, lineTotal: true }
+      });
+
+      for (const it of itemsToRemove) {
+        // DEVOLVER STOCK (porque ahora descontamos al crear/agregar)
+        await tx.product.update({
+          where: { id: it.productId },
+          data: { stock: { increment: it.quantity } },
+        });
+
+        await tx.transaction.create({
+          data: {
+            type: 'STOCK_IN',
+            amount: it.lineTotal,
+            userId,
+            saleId,
+            metadata: { productId: it.productId, quantity: it.quantity, reason: 'Item removed from sale' },
+          }
+        });
+      }
+
       await tx.saleItem.deleteMany({ where: { saleId, productId: { in: productIds } } });
       const allItems = await tx.saleItem.findMany({ where: { saleId }, select: { lineTotal: true } });
       const newTotal = computeTotal(allItems);
@@ -374,7 +433,10 @@ const changeStatus = async (req, res) => {
 
     const userId = getReqUserId(req);
 
-    const sale = await prisma.sale.findUnique({ where: { id: saleId }, select: { id: true, status: true } });
+    const sale = await prisma.sale.findUnique({
+      where: { id: saleId },
+      select: { id: true, status: true, totalPrice: true }
+    });
     if (!sale) return res.status(404).json({ success: false, message: 'Pedido/venta no encontrada' });
 
     if (sale.status === targetStatus) {
@@ -383,15 +445,9 @@ const changeStatus = async (req, res) => {
 
     const current = sale.status;
 
-    // Solo REGISTERED puede cambiar de estado. COMPLETED, CANCELLED y ANNULED son finales.
-    if (current !== SaleStatus.REGISTERED) {
-      return res.status(400).json({ success: false, message: `Un pedido ${current} no puede cambiar de estado. Solo los pedidos REGISTERED pueden modificarse.` });
-    }
-
-    // Desde REGISTERED solo se puede ir a COMPLETED o CANCELLED
-    const allowed = [SaleStatus.COMPLETED, SaleStatus.CANCELLED].includes(targetStatus);
-    if (!allowed) {
-      return res.status(400).json({ success: false, message: 'Transición de estado no permitida. Solo puede completar o cancelar un pedido registrado.' });
+    // Solo REGISTERED o READY pueden cambiar de estado
+    if (current !== SaleStatus.REGISTERED && current !== SaleStatus.READY) {
+      return res.status(400).json({ success: false, message: `Un pedido ${current} no puede cambiar de estado.` });
     }
 
     const items = await prisma.saleItem.findMany({
@@ -401,7 +457,33 @@ const changeStatus = async (req, res) => {
     if (items.length === 0) return res.status(400).json({ success: false, message: 'El pedido no tiene productos' });
 
     await prisma.$transaction(async (tx) => {
-      if (current === SaleStatus.REGISTERED && targetStatus === SaleStatus.COMPLETED) {
+      // 1. Verificar si el stock ya fue descontado (buscando transacciones STOCK_OUT para este saleId)
+      const outTransactions = await tx.transaction.findMany({
+        where: { saleId, type: 'STOCK_OUT' }
+      });
+      const stockAlreadyDeducted = outTransactions.length > 0;
+
+      // Caso A: Cancelación o Anulación -> Devolver stock si ya se descontó
+      if ((targetStatus === SaleStatus.CANCELLED || targetStatus === SaleStatus.ANNULED) && stockAlreadyDeducted) {
+        await Promise.all(
+          items.map((it) => tx.product.update({
+            where: { id: it.productId },
+            data: { stock: { increment: it.quantity } }
+          }))
+        );
+        await tx.transaction.createMany({
+          data: items.map((it) => ({
+            type: 'STOCK_IN',
+            amount: it.lineTotal,
+            userId,
+            saleId,
+            metadata: { productId: it.productId, quantity: it.quantity, reason: 'Sale cancelled/annulled' }
+          })),
+        });
+      }
+
+      // Caso B: Completar -> Asegurar que el stock se descuente (si no se hizo al crear - legacy)
+      if (targetStatus === SaleStatus.COMPLETED && !stockAlreadyDeducted) {
         // Verificar stock y descontar
         const productStates = await tx.product.findMany({
           where: { id: { in: items.map((i) => i.productId) } },
@@ -416,23 +498,19 @@ const changeStatus = async (req, res) => {
         }
 
         await Promise.all(items.map((it) => tx.product.update({ where: { id: it.productId }, data: { stock: { decrement: it.quantity } } })));
-
-        // Auto-desactivar productos cuyo stock llegue a 0 tras la venta
-        const updatedProducts = await tx.product.findMany({
-          where: { id: { in: items.map((i) => i.productId) } },
-          select: { id: true, stock: true },
-        });
-        const toDeactivate = updatedProducts.filter(p => p.stock <= 0).map(p => p.id);
-        if (toDeactivate.length > 0) {
-          await tx.product.updateMany({ where: { id: { in: toDeactivate } }, data: { isActive: false } });
-        }
-
+        
         await tx.transaction.createMany({
-          data: items.map((it) => ({ type: 'STOCK_OUT', amount: it.lineTotal, userId, saleId, metadata: { productId: it.productId, quantity: it.quantity } })),
+          data: items.map((it) => ({
+            type: 'STOCK_OUT',
+            amount: it.lineTotal,
+            userId,
+            saleId,
+            metadata: { productId: it.productId, quantity: it.quantity, reason: 'Legacy sale completion' }
+          })),
         });
       }
 
-      // COMPLETED es estado final — no se puede revertir
+      // 2. Actualizar estado del pedido
       await tx.sale.update({ where: { id: saleId }, data: { status: targetStatus } });
     });
 
@@ -454,6 +532,11 @@ const changeStatus = async (req, res) => {
         })),
         total: saleFull.totalPrice,
       }).catch(err => console.warn('[EMAIL CANCELACIÓN]', err?.message));
+    }
+
+    // Si se completó la venta (stock descontado), revisar otros pedidos pendientes
+    if (targetStatus === SaleStatus.COMPLETED) {
+      checkAndCancelLowStockOrders().catch(err => console.warn('[STOCK CHECKER]', err?.message));
     }
 
     return res.status(200).json({ success: true, message: 'Estado de pedido actualizado', data: saleFull });
@@ -518,7 +601,7 @@ const createMyOrder = async (req, res) => {
     const productIds = items.map((i) => i.productId);
     const products = await prisma.product.findMany({
       where: { id: { in: productIds }, isActive: true },
-      select: { id: true, price: true, stock: true },
+      select: { id: true, price: true, stock: true, name: true },
     });
     if (products.length !== new Set(productIds).size) {
       return res.status(400).json({ success: false, message: 'Uno o más productos no existen o están inactivos' });
@@ -534,6 +617,15 @@ const createMyOrder = async (req, res) => {
     const totalPrice = computeTotal(normalizedItems);
 
     const sale = await prisma.$transaction(async (tx) => {
+      // 1. Validar stock (INDISPENSABLE para pedidos web)
+      for (const it of normalizedItems) {
+        const prod = productById.get(it.productId);
+        if (prod.stock < it.quantity) {
+          throw new Error(`Stock insuficiente para "${prod.name}": disponible ${prod.stock}, requerido ${it.quantity}`);
+        }
+      }
+
+      // 2. Crear pedido
       const s = await tx.sale.create({
         data: {
           clientId: client.id,
@@ -545,9 +637,32 @@ const createMyOrder = async (req, res) => {
         },
         select: { id: true },
       });
+
       await tx.saleItem.createMany({
         data: normalizedItems.map((it) => ({ saleId: s.id, ...it })),
       });
+
+      // 3. DESCONTAR STOCK INMEDIATAMENTE
+      await Promise.all(
+        normalizedItems.map((it) =>
+          tx.product.update({
+            where: { id: it.productId },
+            data: { stock: { decrement: it.quantity } },
+          }),
+        )
+      );
+
+      // 4. Registrar transacción
+      await tx.transaction.createMany({
+        data: normalizedItems.map((it) => ({
+          type: 'STOCK_OUT',
+          amount: it.lineTotal,
+          userId,
+          saleId: s.id,
+          metadata: { productId: it.productId, quantity: it.quantity, reason: 'Web order creation' },
+        })),
+      });
+
       return s;
     });
 
@@ -562,5 +677,63 @@ const createMyOrder = async (req, res) => {
   }
 };
 
-module.exports = { create, createMyOrder, list, getOne, setClient, addItems, removeItems, changeStatus, pdf };
+// ─── PATCH /api/sales/:id/ready — admin marca pedido como listo para recoger ──
+const markReady = async (req, res) => {
+  try {
+    const saleId = Number(req.params.id);
+
+    const sale = await prisma.sale.findUnique({
+      where: { id: saleId },
+      include: {
+        client: true,
+        items: { include: { product: { select: { id: true, name: true } } } },
+      },
+    });
+
+    if (!sale) return res.status(404).json({ success: false, message: 'Pedido no encontrado' });
+    if (sale.status !== SaleStatus.REGISTERED) {
+      return res.status(400).json({ success: false, message: `Solo se pueden marcar como listos los pedidos REGISTERED. Estado actual: ${sale.status}` });
+    }
+
+    // Las 24h empiezan ahora
+    const readyAt = new Date();
+    const expiresAt = new Date(readyAt.getTime() + 24 * 60 * 60 * 1000);
+
+    await prisma.sale.update({
+      where: { id: saleId },
+      data: { status: SaleStatus.READY, readyAt },
+    });
+
+    // Enviar email al cliente
+    if (sale.client?.email) {
+      sendOrderReadyEmail({
+        to: sale.client.email,
+        clientName: sale.client.name,
+        orderId: saleId,
+        items: (sale.items || []).map(i => ({
+          name: i.product?.name || 'Producto',
+          quantity: i.quantity,
+          lineTotal: i.lineTotal,
+        })),
+        total: sale.totalPrice,
+        expiresAt,
+      }).catch(err => console.warn('[EMAIL LISTO]', err?.message));
+    }
+
+    const saleFull = await prisma.sale.findUnique({
+      where: { id: saleId },
+      include: { client: true, employee: true, items: { include: { product: { include: { category: true } } } } },
+    });
+
+    return res.status(200).json({
+      success: true,
+      message: `Pedido #${saleId} marcado como listo. Se notificó al cliente por email. Expira: ${expiresAt.toISOString()}`,
+      data: saleFull,
+    });
+  } catch (error) {
+    return res.status(500).json({ success: false, message: error.message });
+  }
+};
+
+module.exports = { create, createMyOrder, list, getOne, setClient, addItems, removeItems, changeStatus, markReady, pdf };
 

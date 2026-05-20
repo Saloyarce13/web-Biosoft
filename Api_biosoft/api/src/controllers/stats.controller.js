@@ -149,5 +149,65 @@ const topClients = async (req, res) => {
   }
 };
 
-module.exports = { dashboard, stockAvailableByProduct, uniqueClients, activeProviders, activeProducts, topClients };
+const weeklySales = async (req, res) => {
+  try {
+    const eightWeeksAgo = new Date();
+    eightWeeksAgo.setDate(eightWeeksAgo.getDate() - 56);
+    
+    const sales = await prisma.sale.findMany({
+      where: { status: 'COMPLETED', saleDate: { gte: eightWeeksAgo } },
+      select: { saleDate: true, totalPrice: true }
+    });
 
+    const weeklyData = {};
+    for (let i = 0; i < 8; i++) {
+      weeklyData[`Sem ${i + 1}`] = { week: `Sem ${i + 1}`, ventas: 0, transacciones: 0 };
+    }
+
+    sales.forEach(s => {
+      const diffTime = Math.abs(s.saleDate - eightWeeksAgo);
+      const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
+      const weekIndex = Math.min(7, Math.floor(diffDays / 7));
+      const weekLabel = `Sem ${weekIndex + 1}`;
+      if (weeklyData[weekLabel]) {
+        weeklyData[weekLabel].ventas += toNumber(s.totalPrice);
+        weeklyData[weekLabel].transacciones += 1;
+      }
+    });
+
+    return res.status(200).json({ success: true, data: Object.values(weeklyData) });
+  } catch (error) {
+    return res.status(500).json({ success: false, message: error.message });
+  }
+};
+
+const categoryPerformance = async (req, res) => {
+  try {
+    const saleItems = await prisma.saleItem.findMany({
+      where: { sale: { status: 'COMPLETED' } },
+      include: { product: { include: { category: true } } }
+    });
+
+    const categoryMap = {};
+    let totalSales = 0;
+
+    saleItems.forEach(item => {
+      const catName = item.product?.category?.name || 'Sin Categoría';
+      if (!categoryMap[catName]) categoryMap[catName] = 0;
+      categoryMap[catName] += item.quantity;
+      totalSales += item.quantity;
+    });
+
+    const data = Object.keys(categoryMap).map(cat => ({
+      categoria: cat,
+      ventas: categoryMap[cat],
+      porcentaje: totalSales > 0 ? Math.round((categoryMap[cat] / totalSales) * 100) : 0
+    })).sort((a, b) => b.ventas - a.ventas).slice(0, 5);
+
+    return res.status(200).json({ success: true, data });
+  } catch (error) {
+    return res.status(500).json({ success: false, message: error.message });
+  }
+};
+
+module.exports = { dashboard, stockAvailableByProduct, uniqueClients, activeProviders, activeProducts, topClients, weeklySales, categoryPerformance };

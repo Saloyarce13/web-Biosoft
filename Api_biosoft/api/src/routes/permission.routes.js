@@ -1,13 +1,13 @@
-const router = require('express').Router();
+// src/routes/permission.routes.js
+const express = require('express');
+const router = express.Router();
+const permissionController = require('../controllers/permission.controller');
+const { authenticateToken } = require('../middleware/auth');
 
-const { getAll, getOne, create, update, remove } = require('../controllers/permission.controller');
-const { verifyToken, verifyRole } = require('../middlewares/auth.middleware');
-
-router.get('/', verifyToken, getAll);
-router.get('/:id', verifyToken, verifyRole('administrador'), getOne);
-router.post('/', verifyToken, verifyRole('administrador'), create);
-router.put('/:id', verifyToken, verifyRole('administrador'), update);
-router.delete('/:id', verifyToken, verifyRole('administrador'), remove);
+router.get('/', authenticateToken, permissionController.getAll);
+router.get('/:id', authenticateToken, permissionController.getOne);
+router.post('/', authenticateToken, permissionController.create);
+router.put('/:id', authenticateToken, permissionController.update);
+router.delete('/:id', authenticateToken, permissionController.remove);
 
 module.exports = router;
-

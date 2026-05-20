@@ -1,18 +1,15 @@
-const { ZodError } = require('zod');
-
+// src/lib/validate.js
 const validate = (schema, data) => {
-  const result = schema.safeParse(data);
-  if (result.success) return { ok: true, data: result.data };
-
-  if (result.error instanceof ZodError) {
-    return {
-      ok: false,
-      error: result.error.issues.map((i) => `${i.path.join('.') || 'field'}: ${i.message}`),
-    };
+  try {
+    const parsed = schema.parse(data);
+    return { ok: true, data: parsed };
+  } catch (error) {
+    const errorMessages = error.errors?.map(err => 
+      `${err.path.join('.')}: ${err.message}`
+    ).join(', ') || error.message;
+    
+    return { ok: false, error: errorMessages };
   }
-
-  return { ok: false, error: ['Error de validación'] };
 };
 
 module.exports = { validate };
-

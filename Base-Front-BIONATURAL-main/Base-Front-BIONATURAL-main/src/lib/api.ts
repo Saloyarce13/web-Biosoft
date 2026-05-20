@@ -317,6 +317,14 @@ export const getActiveProducts = async () => {
   return apiFetch<any[]>('/stats/active-products');
 };
 
+export const getWeeklySales = async () => {
+  return apiFetch<any[]>('/stats/weekly-sales');
+};
+
+export const getCategoryPerformance = async () => {
+  return apiFetch<any[]>('/stats/category-performance');
+};
+
 // Users API
 export const getUsers = async () => {
   return apiFetch<any[]>('/users');
@@ -460,7 +468,7 @@ export const uploadProductImage = async (file: File): Promise<string> => {
   const formData = new FormData();
   formData.append('image', file);
 
-  const res = await fetch(`${(import.meta.env.VITE_API_BASE_URL as string || 'http://localhost:3000/api')}/upload/product-image`, {
+  const res = await fetch(`${API_BASE_URL.replace(/\/$/, '')}/upload/product-image`, {
     method: 'POST',
     headers: token ? { Authorization: `Bearer ${token}` } : {},
     body: formData,
@@ -469,4 +477,95 @@ export const uploadProductImage = async (file: File): Promise<string> => {
   const json = await res.json();
   if (!json.success) throw new Error(json.message || 'Error al subir imagen');
   return json.data.url as string;
+};
+
+// ─── System Config API ────────────────────────────────────────────────────────
+// Tipos para la configuración del sistema
+export type DocumentType = { value: string; label: string };
+export type StatusOption = { value: string; label: string; color: string };
+export type SidebarItemConfig = {
+  id: string;
+  label: string;
+  icon: string;
+  roles: string[];
+  permission: string | null;
+};
+export type CurrencyConfig = {
+  locale: string;
+  currency: string;
+  minimumFractionDigits: number;
+  maximumFractionDigits: number;
+  symbol: string;
+  name: string;
+};
+export type StoreInfo = {
+  name: string;
+  address: string;
+  mall: string;
+  phone: string;
+  schedule: { weekdays: string; saturday: string; sunday: string };
+};
+export type PickupTimeSlot = { value: string; label: string };
+export type PickupPolicy = {
+  hours_to_pickup: number;
+  payment_on_pickup: boolean;
+  message: string;
+};
+export type SystemConfigData = {
+  document_types: {
+    document_types_user: DocumentType[];
+    document_types_employee: DocumentType[];
+    document_types_provider: DocumentType[];
+    document_types_client: DocumentType[];
+  };
+  statuses: {
+    sale_statuses: StatusOption[];
+    purchase_statuses: StatusOption[];
+  };
+  general: {
+    currency: CurrencyConfig;
+    min_prices: { product_price: number; product_cost: number };
+    pagination: { default_page_size: number; max_page_size: number };
+    company_info: { name: string; description: string; version: string; email: string; phone: string; address: string; website: string };
+  };
+  ui: {
+    sidebar_items: SidebarItemConfig[];
+  };
+  auth: {
+    default_client_role: string;
+  };
+  store: {
+    store_info: StoreInfo;
+    pickup_time_slots: PickupTimeSlot[];
+    pickup_policy: PickupPolicy;
+  };
+};
+
+/**
+ * Obtiene toda la configuración del sistema agrupada.
+ * Este endpoint es público — no requiere autenticación.
+ */
+export const getSystemConfig = async (): Promise<SystemConfigData> => {
+  const url = `${API_BASE_URL.replace(/\/$/, '')}/config`;
+  const res = await fetch(url, { headers: { 'Content-Type': 'application/json' } });
+  const json = await res.json();
+  if (!json.success) throw new Error(json.message || 'Error al cargar configuración');
+  return json.data as SystemConfigData;
+};
+
+/**
+ * Obtiene el valor de una clave de configuración específica.
+ */
+export const getConfigByKey = async (key: string) => {
+  return apiFetch<{ key: string; value: unknown; group: string; description: string }>(`/config/${key}`);
+};
+
+/**
+ * Actualiza el valor de una clave de configuración (solo admin).
+ */
+export const updateConfigByKey = async (key: string, value: unknown) => {
+  return apiFetch<unknown>(`/config/${key}`, {
+    method: 'PUT',
+    body: JSON.stringify({ value }),
+  });
 };

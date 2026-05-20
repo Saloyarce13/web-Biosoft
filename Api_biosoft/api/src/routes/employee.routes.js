@@ -1,12 +1,14 @@
-const router = require('express').Router();
-const { getAll, getOne, create, update, toggleStatus, remove } = require('../controllers/employee.controller');
-const { verifyToken, verifyRole, verifyRoleOrPermission } = require('../middlewares/auth.middleware');
+// src/routes/employee.routes.js
+const express = require('express');
+const router = express.Router();
+const employeeController = require('../controllers/employee.controller');
+const { authenticateToken } = require('../middleware/auth');
 
-router.get('/',    verifyToken, verifyRoleOrPermission({ roles: ['administrador'], permissions: ['employees.view', 'employees.manage'] }), getAll);
-router.get('/:id', verifyToken, verifyRoleOrPermission({ roles: ['administrador'], permissions: ['employees.view', 'employees.manage'] }), getOne);
-router.post('/',            verifyToken, verifyRoleOrPermission({ roles: ['administrador'], permissions: ['employees.manage'] }), create);
-router.put('/:id',          verifyToken, verifyRoleOrPermission({ roles: ['administrador'], permissions: ['employees.manage'] }), update);
-router.patch('/:id/status', verifyToken, verifyRoleOrPermission({ roles: ['administrador'], permissions: ['employees.manage'] }), toggleStatus);
-router.delete('/:id',       verifyToken, verifyRole('administrador'), remove);
+router.get('/', authenticateToken, employeeController.getAll);
+router.get('/:id', authenticateToken, employeeController.getOne);
+router.post('/', authenticateToken, employeeController.create);
+router.put('/:id', authenticateToken, employeeController.update);
+router.patch('/:id/status', authenticateToken, employeeController.toggleStatus);
+router.delete('/:id', authenticateToken, employeeController.remove);
 
 module.exports = router;

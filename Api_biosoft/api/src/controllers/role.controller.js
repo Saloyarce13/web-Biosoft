@@ -27,7 +27,7 @@ const getAll = async (req, res) => {
         _count: {
           select: {
             users: true,
-            rolePermissions: true,
+            permissions: true,
           },
         },
       },
@@ -51,19 +51,37 @@ const getAll = async (req, res) => {
 // ─── GET /api/roles/:id ────────────────────────────────────────────────────────
 const getOne = async (req, res) => {
   try {
+    const roleId = Number(req.params.id);
+
     const role = await prisma.role.findUnique({
-      where: { id: Number(req.params.id) },
-      include: {
+      where: { id: roleId },
+      select: {
+        id: true,
+        name: true,
+        description: true,
+        isActive: true,
+        createdAt: true,
+        updatedAt: true,
         users: { select: { id: true, name: true, email: true } },
-        rolePermissions: {
-          include: { permission: { select: { id: true, name: true } } },
+        permissions: {
+          select: {
+            permission: { select: { id: true, name: true, resource: true, action: true, description: true } },
+          },
         },
       },
     });
 
     if (!role) return res.status(404).json({ success: false, message: 'Rol no encontrado' });
 
-    return res.status(200).json({ success: true, data: role });
+    // Aplanar permisos para facilitar el uso en el frontend
+    const data = {
+      ...role,
+      // Mantener rolePermissions en el formato que espera el frontend
+      rolePermissions: role.permissions.map(rp => ({ permission: rp.permission })),
+      permissions: role.permissions.map(rp => rp.permission),
+    };
+
+    return res.status(200).json({ success: true, data });
   } catch (error) {
     return res.status(500).json({ success: false, message: error.message });
   }

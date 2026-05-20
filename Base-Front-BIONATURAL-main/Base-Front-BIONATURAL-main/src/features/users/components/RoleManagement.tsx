@@ -1,11 +1,10 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import { Button } from '../../../components/ui/button';
-import { Card, CardContent } from '../../../components/ui/card';
 import { Badge } from '../../../components/ui/badge';
+import { Card, CardContent } from '../../../components/ui/card';
 import { Input } from '../../../components/ui/input';
 import { Label } from '../../../components/ui/label';
 import { Checkbox } from '../../../components/ui/checkbox';
-import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '../../../components/ui/table';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '../../../components/ui/select';
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, DialogTrigger } from '../../../components/ui/dialog';
 import { ScrollArea } from '../../../components/ui/scroll-area';
@@ -13,14 +12,14 @@ import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, 
 import { Tooltip, TooltipContent, TooltipTrigger } from '../../../components/ui/tooltip';
 import { Separator } from '../../../components/ui/separator';
 import { toast } from 'sonner';
+import { DataTable, Column } from '../../../shared/components/DataTable';
 import {
   getRoles, createRole, updateRole, deleteRole,
   getPermissions, assignPermissionToRole, removePermissionFromRole, apiFetch
 } from '../../../lib/api';
 import {
   Plus, Edit, Trash2, Shield, Users, Eye,
-  Search, ChevronLeft, ChevronRight, RefreshCw,
-  UserCheck, Lock, Key, ToggleLeft, ToggleRight
+  RefreshCw, UserCheck, Lock, Key, ToggleLeft, ToggleRight
 } from 'lucide-react';
 
 // ── Tipos ──────────────────────────────────────────────────────────────────────
@@ -30,7 +29,7 @@ interface ApiRole {
   description: string | null;
   isActive: boolean;
   activeUsers: number;
-  _count: { users: number; rolePermissions: number };
+  _count: { users: number; permissions: number };
 }
 interface ApiPermission {
   id: number;
@@ -71,7 +70,7 @@ function groupPermissions(perms: ApiPermission[]) {
 
 const ITEMS_PER_PAGE = 8;
 
-// ── PermissionSelector — fuera del componente principal ───────────────────────
+// ── PermissionSelector ───────────────────────
 function PermissionSelector({ permissions, sel, onToggle, onToggleAll, onToggleBatch }: {
   permissions: ApiPermission[];
   sel: number[];
@@ -136,7 +135,7 @@ function PermissionSelector({ permissions, sel, onToggle, onToggleAll, onToggleB
   );
 }
 
-// ── RoleFormModal — fuera del componente principal ────────────────────────────
+// ── RoleFormModal ────────────────────────────
 function RoleFormModal({ open, onClose, title, name, onNameChange, desc, onDescChange,
   permissions, sel, onToggle, onToggleAll, onToggleBatch, onSubmit, submitting, submitLabel, info }: {
   open: boolean; onClose: () => void; title: string;
@@ -215,9 +214,7 @@ export function RoleManagement() {
   const [roles, setRoles] = useState<ApiRole[]>([]);
   const [permissions, setPermissions] = useState<ApiPermission[]>([]);
   const [loading, setLoading] = useState(true);
-  const [searchTerm, setSearchTerm] = useState('');
   const [statusFilter, setStatusFilter] = useState('all');
-  const [currentPage, setCurrentPage] = useState(1);
 
   const [isCreateOpen, setIsCreateOpen] = useState(false);
   const [createName, setCreateName] = useState('');
@@ -248,20 +245,17 @@ export function RoleManagement() {
 
   useEffect(() => { load(); }, []);
 
-  const filtered = roles.filter(r => {
-    const matchSearch = r.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
-      (r.description || '').toLowerCase().includes(searchTerm.toLowerCase());
-    const matchStatus = statusFilter === 'all' || (statusFilter === 'active' ? r.isActive : !r.isActive);
-    return matchSearch && matchStatus;
-  });
-  const totalPages = Math.ceil(filtered.length / ITEMS_PER_PAGE);
-  const paginated = filtered.slice((currentPage - 1) * ITEMS_PER_PAGE, currentPage * ITEMS_PER_PAGE);
+  const filtered = useMemo(() => {
+    return roles.filter(r => {
+      const matchStatus = statusFilter === 'all' || (statusFilter === 'active' ? r.isActive : !r.isActive);
+      return matchStatus;
+    });
+  }, [roles, statusFilter]);
 
   const togglePerm = (id: number, sel: number[], setSel: (v: number[]) => void) =>
     setSel(sel.includes(id) ? sel.filter(p => p !== id) : [...sel, id]);
   const toggleAll = (sel: number[], setSel: (v: number[]) => void) =>
     setSel(sel.length === permissions.length ? [] : permissions.map(p => p.id));
-  // Agregar/quitar múltiples permisos de una vez (para el botón "Todos" de módulo)
   const toggleBatch = (ids: number[], add: boolean, sel: number[], setSel: (v: number[]) => void) => {
     if (add) {
       setSel([...new Set([...sel, ...ids])]);
@@ -272,7 +266,6 @@ export function RoleManagement() {
 
   const handleCreate = async () => {
     if (!createName.trim()) { toast.error('El nombre es obligatorio'); return; }
-    // Validar duplicado en el frontend antes de llamar a la API
     const nameNorm = createName.trim().toLowerCase();
     if (roles.some(r => r.name.toLowerCase() === nameNorm)) {
       toast.error(`El rol "${createName.trim()}" ya existe`); return;
@@ -341,206 +334,135 @@ export function RoleManagement() {
     finally { setLoadingDetail(false); }
   };
 
+  const tableColumns: Column<ApiRole>[] = [
+    {
+      header: 'Rol',
+      accessor: (r) => (
+        <div className="flex items-center gap-2.5">
+          <div className={`flex h-8 w-8 items-center justify-center rounded-full shrink-0 ${r.isActive ? 'bg-primary/10' : 'bg-muted'}`}>
+            <Shield className={`h-4 w-4 ${r.isActive ? 'text-primary' : 'text-muted-foreground'}`} />
+          </div>
+          <div>
+            <p className="font-medium text-sm capitalize">{r.name}</p>
+            {r.description && <p className="text-xs text-muted-foreground">{r.description}</p>}
+          </div>
+        </div>
+      )
+    },
+    {
+      header: 'Usuarios',
+      accessor: (r) => (
+        <div className="flex items-center gap-1.5">
+          <Users className="h-3.5 w-3.5 text-muted-foreground" />
+          <span className="text-sm">{r._count.users}</span>
+          <span className="text-xs text-muted-foreground">({r.activeUsers} activo{r.activeUsers !== 1 ? 's' : ''})</span>
+        </div>
+      )
+    },
+    {
+      header: 'Permisos',
+      accessor: (r) => (
+        <Badge variant={r._count.permissions > 0 ? 'default' : 'outline'} className="gap-1 text-xs">
+          <Key className="h-3 w-3" />{r._count.permissions}
+        </Badge>
+      )
+    },
+    {
+      header: 'Estado',
+      accessor: (r) => (
+        <Badge variant={r.isActive ? 'default' : 'secondary'} className="text-xs">
+          {r.isActive ? 'Activo' : 'Inactivo'}
+        </Badge>
+      )
+    }
+  ];
+
   return (
     <div className="space-y-5">
-
-      {/* Título */}
       <div className="flex items-center justify-between">
         <div>
           <h1 className="text-xl font-semibold flex items-center gap-2">
             <Shield className="h-5 w-5 text-primary" /> Gestión de Roles
           </h1>
-          <p className="text-sm text-muted-foreground mt-0.5">Administra los roles del sistema y sus permisos</p>
         </div>
         <div className="flex items-center gap-2">
           <Button variant="outline" size="sm" onClick={load} disabled={loading}>
             <RefreshCw className={`h-4 w-4 ${loading ? 'animate-spin' : ''}`} />
           </Button>
-          <Dialog open={isCreateOpen} onOpenChange={setIsCreateOpen}>
-            <DialogTrigger asChild>
-              <Button size="sm" onClick={() => { setCreateName(''); setCreateDesc(''); setCreateSelectedPerms([]); }}>
-                <Plus className="h-4 w-4 mr-1.5" /> Crear Rol
-              </Button>
-            </DialogTrigger>
-          </Dialog>
+          <Button size="sm" onClick={() => { setCreateName(''); setCreateDesc(''); setCreateSelectedPerms([]); setIsCreateOpen(true); }}>
+            <Plus className="h-4 w-4 mr-1.5" /> Crear Rol
+          </Button>
         </div>
       </div>
 
-      {/* Buscador + filtro estado */}
-      <div className="flex gap-3">
-        <div className="relative flex-1">
-          <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground pointer-events-none" />
-          <Input
-            placeholder="Buscar por nombre o descripción..."
-            value={searchTerm}
-            onChange={e => { setSearchTerm(e.target.value); setCurrentPage(1); }}
-            className="pl-10"
-          />
-        </div>
-        <Select value={statusFilter} onValueChange={v => { setStatusFilter(v); setCurrentPage(1); }}>
-          <SelectTrigger className="w-36"><SelectValue placeholder="Estado" /></SelectTrigger>
-          <SelectContent>
-            <SelectItem value="all">Todos</SelectItem>
-            <SelectItem value="active">Activos</SelectItem>
-            <SelectItem value="inactive">Inactivos</SelectItem>
-          </SelectContent>
-        </Select>
-      </div>
-
-      {/* Tabla */}
-      <Card>
-        <CardContent className="p-0">
-          <div className="flex items-center justify-between px-4 py-3 border-b">
-            <span className="text-sm font-medium">Roles del sistema</span>
-            <span className="text-xs text-muted-foreground">{filtered.length} rol{filtered.length !== 1 ? 'es' : ''}</span>
+      <DataTable
+        title="Roles"
+        description={`Mostrando ${filtered.length} roles`}
+        data={filtered}
+        columns={tableColumns}
+        searchableKeys={['name', 'description']}
+        searchPlaceholder="Buscar por nombre o descripción..."
+        itemsPerPage={ITEMS_PER_PAGE}
+        isLoading={loading}
+        customActions={(role) => (
+          <div className="flex items-center justify-end gap-1">
+            <Button variant="ghost" size="icon" className="h-8 w-8" onClick={() => openDetail(role)} title="Ver detalle">
+              <Eye className="h-4 w-4 text-muted-foreground" />
+            </Button>
+            {role.name.toLowerCase() !== 'administrador' && (
+              <>
+                <Button variant="ghost" size="icon" className="h-8 w-8"
+                  onClick={() => openEdit(role)} disabled={!role.isActive}
+                  title={role.isActive ? 'Editar' : 'Rol inactivo'}>
+                  <Edit className={`h-4 w-4 ${role.isActive ? 'text-muted-foreground' : 'text-muted-foreground/30'}`} />
+                </Button>
+                <Button variant="ghost" size="icon" className="h-8 w-8"
+                  onClick={() => handleToggleStatus(role)}
+                  disabled={role.isActive && role._count.users > 0}
+                  title={role.isActive && role._count.users > 0 ? `Tiene ${role._count.users} usuario(s) — no se puede desactivar` : role.isActive ? 'Desactivar' : 'Activar'}>
+                  {role.isActive
+                    ? <ToggleRight className={`h-4 w-4 ${role._count.users > 0 ? 'text-muted-foreground/30' : 'text-green-600'}`} />
+                    : <ToggleLeft className="h-4 w-4 text-muted-foreground" />}
+                </Button>
+                <AlertDialog>
+                  <AlertDialogTrigger asChild>
+                    <Button variant="ghost" size="icon" className="h-8 w-8"
+                      disabled={role._count.users > 0 || !role.isActive}
+                      title={role._count.users > 0 ? 'Tiene usuarios asignados' : !role.isActive ? 'Rol inactivo' : 'Eliminar'}>
+                      <Trash2 className={`h-4 w-4 ${role._count.users === 0 && role.isActive ? 'text-destructive' : 'text-muted-foreground/30'}`} />
+                    </Button>
+                  </AlertDialogTrigger>
+                  <AlertDialogContent>
+                    <AlertDialogHeader>
+                      <AlertDialogTitle>¿Eliminar rol?</AlertDialogTitle>
+                      <AlertDialogDescription>
+                        Se eliminará permanentemente el rol <strong>{role.name}</strong>. Esta acción no se puede deshacer.
+                      </AlertDialogDescription>
+                    </AlertDialogHeader>
+                    <AlertDialogFooter>
+                      <AlertDialogCancel>Cancelar</AlertDialogCancel>
+                      <AlertDialogAction onClick={() => handleDelete(role)} className="bg-destructive text-destructive-foreground hover:bg-destructive/90">
+                        Eliminar
+                      </AlertDialogAction>
+                    </AlertDialogFooter>
+                  </AlertDialogContent>
+                </AlertDialog>
+              </>
+            )}
           </div>
-          {loading ? (
-            <div className="flex items-center justify-center py-14 gap-2 text-muted-foreground">
-              <RefreshCw className="h-5 w-5 animate-spin" /><span className="text-sm">Cargando...</span>
-            </div>
-          ) : (
-            <Table>
-              <TableHeader>
-                <TableRow className="hover:bg-transparent">
-                  <TableHead className="pl-4">Rol</TableHead>
-                  <TableHead>Usuarios</TableHead>
-                  <TableHead>Permisos</TableHead>
-                  <TableHead className="text-right pr-4">Acciones</TableHead>
-                </TableRow>
-              </TableHeader>
-              <TableBody>
-                {paginated.length === 0 ? (
-                  <TableRow>
-                    <TableCell colSpan={4} className="text-center py-10 text-muted-foreground text-sm">
-                      No se encontraron roles
-                    </TableCell>
-                  </TableRow>
-                ) : paginated.map(role => (
-                  <TableRow key={role.id} className={!role.isActive ? 'opacity-50' : ''}>
-                    <TableCell className="pl-4">
-                      <div className="flex items-center gap-2.5">
-                        <div className={`flex h-8 w-8 items-center justify-center rounded-full shrink-0 ${role.isActive ? 'bg-primary/10' : 'bg-muted'}`}>
-                          <Shield className={`h-4 w-4 ${role.isActive ? 'text-primary' : 'text-muted-foreground'}`} />
-                        </div>
-                        <div>
-                          <div className="flex items-center gap-2">
-                            <p className="font-medium text-sm capitalize">{role.name}</p>
-                            <Badge variant={role.isActive ? 'default' : 'secondary'} className="text-xs px-1.5 py-0">
-                              {role.isActive ? 'Activo' : 'Inactivo'}
-                            </Badge>
-                          </div>
-                          {role.description && <p className="text-xs text-muted-foreground">{role.description}</p>}
-                        </div>
-                      </div>
-                    </TableCell>
-                    <TableCell>
-                      <div className="flex flex-col gap-0.5">
-                        <span className="text-sm font-medium">{role._count.users} usuarios</span>
-                        <span className="text-xs text-muted-foreground">{role.activeUsers} activo{role.activeUsers !== 1 ? 's' : ''}</span>
-                      </div>
-                    </TableCell>
-                    <TableCell>
-                      <Badge variant={role._count.rolePermissions > 0 ? 'default' : 'outline'} className="gap-1 text-xs">
-                        <Key className="h-3 w-3" />{role._count.rolePermissions} permiso{role._count.rolePermissions !== 1 ? 's' : ''}
-                      </Badge>
-                    </TableCell>
-                    <TableCell className="text-right pr-4">
-                      <div className="flex items-center justify-end gap-1">
-                        {/* Ver detalle — siempre visible */}
-                        <Tooltip>
-                          <TooltipTrigger asChild>
-                            <Button variant="ghost" size="icon" className="h-8 w-8" onClick={() => openDetail(role)}>
-                              <Eye className="h-4 w-4 text-muted-foreground" />
-                            </Button>
-                          </TooltipTrigger>
-                          <TooltipContent>Ver detalle</TooltipContent>
-                        </Tooltip>
-                        {/* Editar, toggle y eliminar — ocultos para administrador */}
-                        {role.name.toLowerCase() !== 'administrador' && (<>
-                        <Tooltip>
-                          <TooltipTrigger asChild>
-                            <span>
-                              <Button variant="ghost" size="icon" className="h-8 w-8"
-                                onClick={() => openEdit(role)}
-                                disabled={!role.isActive}>
-                                <Edit className={`h-4 w-4 ${role.isActive ? 'text-muted-foreground' : 'text-muted-foreground/40'}`} />
-                              </Button>
-                            </span>
-                          </TooltipTrigger>
-                          <TooltipContent>{role.isActive ? 'Editar' : 'Rol inactivo — no se puede editar'}</TooltipContent>
-                        </Tooltip>
-                        <Tooltip>
-                          <TooltipTrigger asChild>
-                            <Button variant="ghost" size="icon" className="h-8 w-8"
-                              onClick={() => handleToggleStatus(role)}
-                              disabled={role.isActive && role._count.users > 0}>
-                              {role.isActive
-                                ? <ToggleRight className={`h-4 w-4 ${role._count.users > 0 ? 'text-muted-foreground/40' : 'text-green-600'}`} />
-                                : <ToggleLeft className="h-4 w-4 text-muted-foreground" />}
-                            </Button>
-                          </TooltipTrigger>
-                          <TooltipContent>
-                            {role.isActive && role._count.users > 0
-                              ? `Tiene ${role._count.users} usuario(s) asignado(s) — no se puede desactivar`
-                              : role.isActive ? 'Desactivar rol' : 'Activar rol'}
-                          </TooltipContent>
-                        </Tooltip>
-                        <AlertDialog>
-                          <Tooltip>
-                            <TooltipTrigger asChild>
-                              <span>
-                                <AlertDialogTrigger asChild>
-                                  <Button variant="ghost" size="icon" className="h-8 w-8"
-                                    disabled={role._count.users > 0 || !role.isActive}>
-                                    <Trash2 className="h-4 w-4 text-destructive" />
-                                  </Button>
-                                </AlertDialogTrigger>
-                              </span>
-                            </TooltipTrigger>
-                            <TooltipContent>
-                              {role._count.users > 0 ? 'Tiene usuarios asignados' : !role.isActive ? 'Rol inactivo — no se puede eliminar' : 'Eliminar'}
-                            </TooltipContent>
-                          </Tooltip>
-                          <AlertDialogContent>
-                            <AlertDialogHeader>
-                              <AlertDialogTitle>¿Eliminar rol?</AlertDialogTitle>
-                              <AlertDialogDescription>
-                                Se eliminará permanentemente el rol <strong>{role.name}</strong>. Esta acción no se puede deshacer.
-                              </AlertDialogDescription>
-                            </AlertDialogHeader>
-                            <AlertDialogFooter>
-                              <AlertDialogCancel>Cancelar</AlertDialogCancel>
-                              <AlertDialogAction onClick={() => handleDelete(role)} className="bg-destructive text-destructive-foreground hover:bg-destructive/90">
-                                Eliminar
-                              </AlertDialogAction>
-                            </AlertDialogFooter>
-                          </AlertDialogContent>
-                        </AlertDialog>
-                        </>)}
-                      </div>
-                    </TableCell>
-                  </TableRow>
-                ))}
-              </TableBody>
-            </Table>
-          )}
-          {totalPages > 1 && (
-            <div className="flex items-center justify-between px-4 py-3 border-t">
-              <p className="text-xs text-muted-foreground">Página {currentPage} de {totalPages}</p>
-              <div className="flex gap-1">
-                <Button variant="outline" size="sm" onClick={() => setCurrentPage(p => Math.max(1, p - 1))} disabled={currentPage === 1}>
-                  <ChevronLeft className="h-4 w-4" />
-                </Button>
-                <Button variant="outline" size="sm" onClick={() => setCurrentPage(p => Math.min(totalPages, p + 1))} disabled={currentPage === totalPages}>
-                  <ChevronRight className="h-4 w-4" />
-                </Button>
-              </div>
-            </div>
-          )}
-        </CardContent>
-      </Card>
+        )}
+        extraFilters={
+          <Select value={statusFilter} onValueChange={setStatusFilter}>
+            <SelectTrigger className="w-36 h-9"><SelectValue placeholder="Estado" /></SelectTrigger>
+            <SelectContent>
+              <SelectItem value="all">Todos</SelectItem>
+              <SelectItem value="active">Activos</SelectItem>
+              <SelectItem value="inactive">Inactivos</SelectItem>
+            </SelectContent>
+          </Select>
+        }
+      />
 
-      {/* Modal Crear */}
       <RoleFormModal
         open={isCreateOpen} onClose={() => setIsCreateOpen(false)} title="Nuevo Rol"
         name={createName} onNameChange={setCreateName}
@@ -553,7 +475,6 @@ export function RoleManagement() {
         onSubmit={handleCreate} submitting={creating} submitLabel="Crear Rol"
       />
 
-      {/* Modal Editar */}
       <RoleFormModal
         open={isEditOpen} onClose={() => setIsEditOpen(false)} title="Editar Rol"
         name={editName} onNameChange={setEditName}
@@ -572,7 +493,6 @@ export function RoleManagement() {
         )}
       />
 
-      {/* Modal Detalle */}
       <Dialog open={isDetailOpen} onOpenChange={setIsDetailOpen}>
         <DialogContent className="max-w-lg w-full flex flex-col p-0 gap-0" style={{ maxHeight: '90vh' }}>
           <DialogHeader className="px-6 py-4 border-b shrink-0">

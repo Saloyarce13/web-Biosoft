@@ -6,7 +6,7 @@ import { Badge } from '../../../components/ui/badge';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '../../../components/ui/table';
 import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer, BarChart, Bar, PieChart, Pie, Cell, Area, AreaChart } from 'recharts';
 import { ProviderReports } from '../../providers/components/ProviderReports';
-import { getActiveProviders, getDashboardStats, getStockAvailableByProduct, getUniqueClients, getTopClients } from '../../../lib/api';
+import { getActiveProviders, getDashboardStats, getStockAvailableByProduct, getUniqueClients, getTopClients, getWeeklySales, getCategoryPerformance } from '../../../lib/api';
 import { 
   TrendingUp, 
   TrendingDown, 
@@ -22,25 +22,7 @@ import {
   Building2
 } from 'lucide-react';
 
-// Mock data for charts and reports
-const WEEKLY_SALES_DATA = [
-  { week: 'Sem 1', ventas: 12500, transacciones: 45 },
-  { week: 'Sem 2', ventas: 15300, transacciones: 52 },
-  { week: 'Sem 3', ventas: 11800, transacciones: 41 },
-  { week: 'Sem 4', ventas: 18900, transacciones: 67 },
-  { week: 'Sem 5', ventas: 16400, transacciones: 58 },
-  { week: 'Sem 6', ventas: 21200, transacciones: 72 },
-  { week: 'Sem 7', ventas: 19600, transacciones: 65 },
-  { week: 'Sem 8', ventas: 23400, transacciones: 81 }
-];
 
-const CATEGORY_PERFORMANCE = [
-  { categoria: 'Tés e Infusiones', ventas: 245, porcentaje: 35 },
-  { categoria: 'Aceites Esenciales', ventas: 189, porcentaje: 27 },
-  { categoria: 'Suplementos', ventas: 156, porcentaje: 22 },
-  { categoria: 'Hierbas Medicinales', ventas: 78, porcentaje: 11 },
-  { categoria: 'Cosméticos Naturales', ventas: 32, porcentaje: 5 }
-];
 
 // Colores del sistema de diseño Bionatural
 const CHART_COLORS = {
@@ -98,6 +80,8 @@ export function ReportsAnalytics() {
   const [uniqueClients, setUniqueClients] = useState<Client[]>([]);
   const [topClients, setTopClients] = useState<any[]>([]);
   const [stockProducts, setStockProducts] = useState<StockProduct[]>([]);
+  const [weeklySalesData, setWeeklySalesData] = useState<any[]>([]);
+  const [categoryPerfData, setCategoryPerfData] = useState<any[]>([]);
   const [statsLoading, setStatsLoading] = useState(false);
   const [statsError, setStatsError] = useState<string | null>(null);
 
@@ -107,12 +91,14 @@ export function ReportsAnalytics() {
       setStatsError(null);
 
       try {
-        const [dashboardRes, providersRes, clientsRes, stockRes, topClientsRes] = await Promise.all([
+        const [dashboardRes, providersRes, clientsRes, stockRes, topClientsRes, weeklyRes, catRes] = await Promise.all([
           getDashboardStats(),
           getActiveProviders(),
           getUniqueClients(),
           getStockAvailableByProduct(),
           getTopClients(),
+          getWeeklySales(),
+          getCategoryPerformance()
         ]);
 
         setDashboardStats(dashboardRes.data);
@@ -120,6 +106,8 @@ export function ReportsAnalytics() {
         setUniqueClients(clientsRes.data);
         setStockProducts(stockRes.data);
         setTopClients(topClientsRes.data);
+        setWeeklySalesData(weeklyRes.data);
+        setCategoryPerfData(catRes.data);
       } catch (error) {
         setStatsError(error instanceof Error ? error.message : 'Error al cargar estadísticas');
       } finally {
@@ -207,7 +195,7 @@ export function ReportsAnalytics() {
       </CardHeader>
       <CardContent>
         <ResponsiveContainer width="100%" height={300}>
-          <LineChart data={WEEKLY_SALES_DATA}>
+          <LineChart data={weeklySalesData}>
             <CartesianGrid strokeDasharray="3 3" stroke="#f0f0f0" />
             <XAxis 
               dataKey="week" 
@@ -260,7 +248,7 @@ export function ReportsAnalytics() {
           <ResponsiveContainer width="100%" height={250}>
             <PieChart>
               <Pie
-                data={CATEGORY_PERFORMANCE}
+                data={categoryPerfData}
                 cx="50%"
                 cy="50%"
                 labelLine={false}
@@ -269,7 +257,7 @@ export function ReportsAnalytics() {
                 fill="#8884d8"
                 dataKey="ventas"
               >
-                {CATEGORY_PERFORMANCE.map((entry, index) => (
+                {categoryPerfData.map((entry, index) => (
                   <Cell key={`cell-${index}`} fill={PIE_COLORS[index % PIE_COLORS.length]} />
                 ))}
               </Pie>
@@ -278,7 +266,7 @@ export function ReportsAnalytics() {
           </ResponsiveContainer>
           
           <div className="space-y-3">
-            {CATEGORY_PERFORMANCE.map((category, index) => (
+            {categoryPerfData.map((category, index) => (
               <div key={category.categoria} className="flex items-center justify-between">
                 <div className="flex items-center gap-3">
                   <div 

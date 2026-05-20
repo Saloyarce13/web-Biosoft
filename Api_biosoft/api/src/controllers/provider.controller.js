@@ -2,45 +2,50 @@ const { z } = require('zod');
 const prisma = require('../lib/prisma');
 const { validate } = require('../lib/validate');
 
+// Regex de validaciones (proveedores pueden tener NIT con guión o solo dígitos)
+const DOC_NUMBER_REGEX = /^[\d\-]{1,20}$/; // dígitos y guión, máx 20 (NIT: 900123456-1)
+const PHONE_REGEX      = /^\+?\d{10,20}$/; // 10-20 dígitos, permite '+' al inicio
+const VALID_DOC_TYPES  = ['NIT', 'CC', 'CE', 'PAS', 'RUT'];
+
 const createProviderSchema = z.object({
-  name: z.string().min(2).max(150),
-  businessName: z.string().max(150).optional().nullable(),
-  documentType: z.string().max(10).optional().nullable(),
-  documentNumber: z.string().max(20).optional().nullable(),
-  contactPerson: z.string().max(120).optional().nullable(),
-  email: z.string().email().optional().nullable(),
-  phone: z.string().max(30).optional().nullable(),
-  address: z.string().max(250).optional().nullable(),
-  website: z.string().max(250).optional().nullable(),
-  notes: z.string().max(500).optional().nullable(),
+  name:           z.string().min(2).max(150),
+  businessName:   z.string().max(150).optional().nullable(),
+  documentType:   z.enum(VALID_DOC_TYPES, { message: 'Tipo de documento inválido' }).optional().nullable(),
+  documentNumber: z.string().regex(DOC_NUMBER_REGEX, 'Número de documento inválido (máx 20 caracteres, solo dígitos y guión)').optional().nullable(),
+  contactPerson:  z.string().max(120).optional().nullable(),
+  email:          z.string().email('Email inválido').optional().nullable(),
+  phone:          z.string().regex(PHONE_REGEX, 'El teléfono debe tener entre 10 y 20 dígitos (puede incluir +)').optional().nullable(),
+  address:        z.string().max(250).optional().nullable(),
+  website:        z.string().max(250).optional().nullable(),
+  notes:          z.string().max(500).optional().nullable(),
 });
 
 const updateProviderSchema = z.object({
-  name: z.string().min(2).max(150).optional(),
-  businessName: z.string().max(150).optional().nullable(),
-  documentType: z.string().max(10).optional().nullable(),
-  documentNumber: z.string().max(20).optional().nullable(),
-  contactPerson: z.string().max(120).optional().nullable(),
-  email: z.string().email().optional().nullable(),
-  phone: z.string().max(30).optional().nullable(),
-  address: z.string().max(250).optional().nullable(),
-  website: z.string().max(250).optional().nullable(),
-  notes: z.string().max(500).optional().nullable(),
-  isActive: z.coerce.boolean().optional(),
+  name:           z.string().min(2).max(150).optional(),
+  businessName:   z.string().max(150).optional().nullable(),
+  documentType:   z.enum(VALID_DOC_TYPES, { message: 'Tipo de documento inválido' }).optional().nullable(),
+  documentNumber: z.string().regex(DOC_NUMBER_REGEX, 'Número de documento inválido (máx 20 caracteres, solo dígitos y guión)').optional().nullable(),
+  contactPerson:  z.string().max(120).optional().nullable(),
+  email:          z.string().email('Email inválido').optional().nullable(),
+  phone:          z.string().regex(PHONE_REGEX, 'El teléfono debe tener entre 10 y 20 dígitos (puede incluir +)').optional().nullable(),
+  address:        z.string().max(250).optional().nullable(),
+  website:        z.string().max(250).optional().nullable(),
+  notes:          z.string().max(500).optional().nullable(),
+  isActive:       z.coerce.boolean().optional(),
 });
 
 const getAll = async (req, res) => {
+  console.log('DEBUG: Recibida petición GET /api/providers');
   try {
     const { all } = req.query;
+    console.log('DEBUG: Query param all =', all);
     const where = all === 'true' ? {} : { isActive: true };
+    console.log('DEBUG: Consultando Prisma...');
     const providers = await prisma.provider.findMany({
       where,
       orderBy: { createdAt: 'desc' },
-      include: {
-        _count: { select: { products: { where: { isActive: true } } } },
-      },
     });
-    const data = providers.map(p => ({ ...p, productCount: p._count.products, _count: undefined }));
+    const data = providers.map(p => ({ ...p, productCount: 0 }));
     return res.status(200).json({ success: true, total: data.length, data });
   } catch (error) {
     return res.status(500).json({ success: false, message: error.message });

@@ -1,7 +1,9 @@
-const router = require('express').Router();
-const { list } = require('../controllers/transaction.controller');
-const { verifyToken, verifyRoleOrPermission } = require('../middlewares/auth.middleware');
+// src/routes/transaction.routes.js
+const express = require('express');
+const router = express.Router();
+const transactionController = require('../controllers/transaction.controller');
+const { authenticateToken } = require('../middleware/auth');
 
-router.get('/', verifyToken, verifyRoleOrPermission({ roles: ['administrador', 'contador'], permissions: ['reports.view'] }), list);
+router.get('/', authenticateToken, transactionController.list);
 
 module.exports = router;

@@ -4,6 +4,7 @@ import { Button } from '../../../components/ui/button';
 import { Badge } from '../../../components/ui/badge';
 import { ImageWithFallback } from '../../../components/figma/ImageWithFallback';
 import { formatCOP } from '../../../shared/utils/storage';
+import { useCart } from '../../../shared/contexts/CartContext';
 import {
   ShoppingCart,
   Package,
@@ -48,12 +49,12 @@ interface ProductDetailModalProps {
   product: Product | null;
   isOpen: boolean;
   onClose: () => void;
-  onAddToCart: (product: Product, quantity?: number) => void;
-  isFavorite?: (id: string | number) => boolean;
-  onToggleFavorite?: (product: Product) => void;
+  isFavorite: (id: string | number) => boolean;
+  onToggleFavorite: (product: Product) => void;
 }
 
-export function ProductDetailModal({ product, isOpen, onClose, onAddToCart, isFavorite, onToggleFavorite }: ProductDetailModalProps) {
+export function ProductDetailModal({ product, isOpen, onClose, isFavorite, onToggleFavorite }: ProductDetailModalProps) {
+  const { addToCart } = useCart();
   const [quantity, setQuantity] = useState(1);
   const [lightboxOpen, setLightboxOpen] = useState(false);
 
@@ -70,7 +71,7 @@ export function ProductDetailModal({ product, isOpen, onClose, onAddToCart, isFa
   const totalPrice = formatCOP(product.price * quantity);
 
   const handleAddToCart = () => {
-    onAddToCart(product, quantity);
+    addToCart(product, quantity);
     onClose();
   };
 
@@ -132,13 +133,14 @@ export function ProductDetailModal({ product, isOpen, onClose, onAddToCart, isFa
 
             {/* Imagen — full width, click abre lightbox */}
             <div
-              className="w-full shrink-0 cursor-pointer overflow-hidden bg-muted"
+              className="w-full shrink-0 cursor-pointer overflow-hidden bg-gradient-to-br from-emerald-50 to-green-100"
               style={{ height: '240px' }}
               onClick={() => product.image && setLightboxOpen(true)}
             >
               <ImageWithFallback
                 src={product.image}
                 alt={product.name}
+                category={product.category}
                 className="w-full h-full object-cover"
               />
             </div>

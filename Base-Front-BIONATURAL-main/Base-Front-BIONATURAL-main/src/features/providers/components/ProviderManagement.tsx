@@ -9,6 +9,7 @@ import { Switch } from '../../../components/ui/switch';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '../../../components/ui/select';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '../../../components/ui/table';
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '../../../components/ui/dialog';
+import { DataTable, Column } from '../../../shared/components/DataTable';
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle, AlertDialogTrigger } from '../../../components/ui/alert-dialog';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '../../../components/ui/tabs';
 import { Calendar } from '../../../components/ui/calendar';
@@ -19,6 +20,7 @@ import { toast } from 'sonner';
 import { format } from 'date-fns';
 import { es } from 'date-fns/locale';
 import { getProviders, createProvider, updateProvider, deleteProvider } from '../../../lib/api';
+import { useDocumentTypesProvider } from '../../../shared/contexts/SystemConfigContext';
 import {
   Plus,
   Search,
@@ -92,12 +94,8 @@ const PROVIDER_STATUS = [
   { value: 'Inactivo', label: 'Inactivo', color: 'bg-gray-100 text-gray-800'  },
 ];
 
-// Tipos de documento (solo los 3 requeridos)
-const DOCUMENT_TYPES = [
-  { value: 'CC',  label: 'Cédula de Ciudadanía' },
-  { value: 'NIT', label: 'NIT' },
-  { value: 'CE',  label: 'Cédula de Extranjería' },
-];
+// Tipos de documento — se cargan desde la BD vía SystemConfigContext
+// (ver useDocumentTypesProvider en el componente)
 
 // Categorías de productos
 const PRODUCT_CATEGORIES = [
@@ -170,7 +168,7 @@ const SAMPLE_PROVIDERS: Provider[] = [
     id: '2',
     name: 'Essential Oils International',
     businessName: 'Essential Oils International Ltd.',
-    documentType: 'TIN',
+    documentType: 'CE',
     taxId: 'EOI-98765432100',
     email: 'sales@essentialoils.int',
     phone: '+44 20 1234 5678',
@@ -192,7 +190,7 @@ const SAMPLE_PROVIDERS: Provider[] = [
     id: '3',
     name: 'Orgánicos del Valle',
     businessName: 'Cooperativa Orgánicos del Valle',
-    documentType: 'RUC',
+    documentType: 'CE',
     taxId: 'OV-55512345678',
     email: 'ventas@organicosvalle.com',
     phone: '+1 (555) 200-2002',
@@ -263,7 +261,7 @@ const SAMPLE_PROVIDERS: Provider[] = [
     phone: '+1 (555) 500-5005',
     address: 'Plaza Natural 88, Green Town',
     type: 'Nacional',
-    status: 'Evaluación',
+    status: 'Inactivo',
     categories: ['Cosméticos Naturales'],
     isActive: false,
     rating: 0,
@@ -280,6 +278,7 @@ const SAMPLE_PROVIDERS: Provider[] = [
 const ITEMS_PER_PAGE = 5;
 
 export function ProviderManagement() {
+  const DOCUMENT_TYPES = useDocumentTypesProvider();
   // Estado para proveedores desde API
   const [apiProviders, setApiProviders] = useState<Provider[]>([]);
   const [loading, setLoading] = useState(true);
@@ -331,11 +330,9 @@ export function ProviderManagement() {
 
   // Siempre usar apiProviders como fuente de verdad
   const providers = apiProviders;
-  const [searchTerm, setSearchTerm] = useState('');
   const [typeFilter, setTypeFilter] = useState('all');
   const [statusFilter, setStatusFilter] = useState('all');
   const [categoryFilter, setCategoryFilter] = useState('all');
-  const [currentPage, setCurrentPage] = useState(1);
   const [selectedProvider, setSelectedProvider] = useState<Provider | null>(null);
   const [currentView, setCurrentView] = useState<'list' | 'create' | 'edit' | 'detail' | 'reports'>('list');
   const [activeTab, setActiveTab] = useState('general');
@@ -379,20 +376,14 @@ export function ProviderManagement() {
 
   // Filtrar proveedores
   const filteredProviders = providers.filter(provider => {
-    const matchesSearch = provider.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
-                         provider.businessName.toLowerCase().includes(searchTerm.toLowerCase()) ||
-                         provider.contactPerson.toLowerCase().includes(searchTerm.toLowerCase());
     const matchesType = typeFilter === 'all' || provider.type === typeFilter;
     const matchesStatus = statusFilter === 'all' || provider.status === statusFilter;
     const matchesCategory = categoryFilter === 'all' || provider.categories.includes(categoryFilter);
     
-    return matchesSearch && matchesType && matchesStatus && matchesCategory;
+    return matchesType && matchesStatus && matchesCategory;
   });
 
-  // Paginación
-  const totalPages = Math.ceil(filteredProviders.length / ITEMS_PER_PAGE);
-  const startIndex = (currentPage - 1) * ITEMS_PER_PAGE;
-  const paginatedProviders = filteredProviders.slice(startIndex, startIndex + ITEMS_PER_PAGE);
+  const dataForTable = filteredProviders;
 
   // Limpiar formulario
   const clearForm = () => {
@@ -405,7 +396,7 @@ export function ProviderManagement() {
       phone: '',
       address: '',
       type: 'Local',
-      status: 'Evaluación',
+      status: 'Inactivo',
       categories: [],
       isActive: true,
       contactPerson: '',
@@ -993,7 +984,7 @@ export function ProviderManagement() {
               <Building2 className="h-4 w-4 text-primary" />
             </div>
             <div>
-              <p className="font-semibold text-sm">{isEdit ? 'Editar Proveedor' : 'Registrar Proveedor'}</p>
+              <p className="font-semibold text-sm">{isEdit ? 'Editar Proveedor' : 'Nuevo Proveedor'}</p>
               <p className="text-xs text-muted-foreground">
                 {isEdit ? selectedProvider?.name : 'Los campos con * son obligatorios'}
               </p>
@@ -1112,7 +1103,7 @@ export function ProviderManagement() {
             {/* Botones */}
             <div className="flex gap-2 pt-1">
               <Button onClick={isEdit ? handleUpdateProvider : handleCreateProvider} className="flex-1 h-9 text-sm">
-                {isEdit ? <><Edit className="h-3.5 w-3.5 mr-1.5" />Actualizar</> : <><Plus className="h-3.5 w-3.5 mr-1.5" />Registrar</>}
+                {isEdit ? <><Edit className="h-3.5 w-3.5 mr-1.5" />Actualizar</> : <><Plus className="h-3.5 w-3.5 mr-1.5" />Guardar</>}
               </Button>
               <Button variant="outline" onClick={cancel} className="flex-1 h-9 text-sm">Cancelar</Button>
             </div>
@@ -1162,9 +1153,7 @@ export function ProviderManagement() {
             <Building2 className="h-6 w-6" />
             Gestión de Proveedores
           </h2>
-          <p className="text-muted-foreground">
-            Administra la información de tus proveedores ({filteredProviders.length} proveedores)
-          </p>
+          
         </div>
         
         <div className="flex gap-3">
@@ -1182,231 +1171,167 @@ export function ProviderManagement() {
         </div>
       </div>
 
-      {/* Controles de búsqueda y filtros */}
-      <Card>
-        <CardContent className="p-4">
-          <div className="flex flex-col lg:flex-row gap-4">
-            <div className="relative flex-1">
-              <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 h-4 w-4 text-muted-foreground" />
-              <Input
-                placeholder="Buscar por nombre, razón social o contacto..."
-                value={searchTerm}
-                onChange={(e) => setSearchTerm(e.target.value)}
-                className="pl-10"
-              />
-            </div>
-            <div className="flex gap-2">
-              <Select value={typeFilter} onValueChange={setTypeFilter}>
-                <SelectTrigger className="w-40">
-                  <SelectValue placeholder="Tipo" />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="all">Todos los tipos</SelectItem>
-                  {PROVIDER_TYPES.map(type => (
-                    <SelectItem key={type.value} value={type.value}>
-                      {type.label}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-              
-              <Select value={statusFilter} onValueChange={setStatusFilter}>
-                <SelectTrigger className="w-40">
-                  <SelectValue placeholder="Estado" />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="all">Todos los estados</SelectItem>
-                  {PROVIDER_STATUS.map(status => (
-                    <SelectItem key={status.value} value={status.value}>
-                      {status.label}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
+      <DataTable
+        title="Lista de Proveedores"
+        description={`Mostrando ${filteredProviders.length} proveedores`}
+        data={dataForTable}
+        columns={[
+          {
+            header: 'Proveedor',
+            accessor: (provider: Provider) => (
+              <div>
+                <div className="font-medium">{provider.name}</div>
+                <div className="text-sm text-muted-foreground">{provider.businessName}</div>
+                <div className="text-xs text-muted-foreground">
+                  {provider.documentType}: {provider.taxId}
+                </div>
+              </div>
+            )
+          },
+          {
+            header: 'Contacto',
+            accessor: (provider: Provider) => (
+              <div className="space-y-1">
+                <div className="flex items-center gap-1 text-sm">
+                  <Users className="h-3 w-3" />
+                  {provider.contactPerson}
+                </div>
+                <div className="flex items-center gap-1 text-sm text-muted-foreground">
+                  <Mail className="h-3 w-3" />
+                  {provider.email}
+                </div>
+                {provider.phone && (
+                  <div className="flex items-center gap-1 text-sm text-muted-foreground">
+                    <Phone className="h-3 w-3" />
+                    {provider.phone}
+                  </div>
+                )}
+              </div>
+            )
+          },
+          {
+            header: 'Estado',
+            accessor: (provider: Provider) => (
+              <div className="flex items-center gap-2">
+                <Badge className={getStatusColor(provider.status)}>
+                  {provider.status}
+                </Badge>
+                <Switch
+                  checked={provider.isActive}
+                  onCheckedChange={() => handleToggleProviderStatus(provider.id)}
+                />
+              </div>
+            )
+          }
+        ]}
+        searchableKeys={['name', 'businessName', 'contactPerson']}
+        searchPlaceholder="Buscar por nombre, razón social o contacto..."
+        itemsPerPage={ITEMS_PER_PAGE}
+        isLoading={loading}
+        customActions={(provider: Provider) => (
+          <>
+            <Button
+              variant="ghost"
+              size="sm"
+              onClick={() => {
+                setSelectedProvider(provider);
+                setProviderProducts([]);
+                loadProviderProducts(provider.id);
+                setCurrentView('detail');
+              }}
+              title="Ver detalle"
+            >
+              <Eye className="h-4 w-4" />
+            </Button>
+            <Button
+              variant="ghost"
+              size="sm"
+              onClick={() => openEditModal(provider)}
+              disabled={!provider.isActive}
+              title={provider.isActive ? 'Editar proveedor' : 'Proveedor inactivo'}
+              className={!provider.isActive ? 'opacity-30 cursor-not-allowed' : ''}
+            >
+              <Edit className="h-4 w-4" />
+            </Button>
+            <AlertDialog>
+              <AlertDialogTrigger asChild>
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  disabled={!provider.isActive}
+                  className={`text-destructive hover:text-destructive ${!provider.isActive ? 'opacity-30 cursor-not-allowed' : ''}`}
+                  title={provider.isActive ? 'Eliminar proveedor' : 'Proveedor inactivo'}
+                >
+                  <Trash2 className="h-4 w-4" />
+                </Button>
+              </AlertDialogTrigger>
+              <AlertDialogContent>
+                <AlertDialogHeader>
+                  <AlertDialogTitle>¿Eliminar proveedor?</AlertDialogTitle>
+                  <AlertDialogDescription>
+                    Esta acción no se puede deshacer. Se eliminará permanentemente
+                    el proveedor "{provider.name}" y todos sus datos asociados.
+                  </AlertDialogDescription>
+                </AlertDialogHeader>
+                <AlertDialogFooter>
+                  <AlertDialogCancel>Cancelar</AlertDialogCancel>
+                  <AlertDialogAction
+                    onClick={() => handleDeleteProvider(provider.id)}
+                    className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+                  >
+                    Eliminar
+                  </AlertDialogAction>
+                </AlertDialogFooter>
+              </AlertDialogContent>
+            </AlertDialog>
+          </>
+        )}
+        extraFilters={
+          <div className="flex gap-2">
+            <Select value={typeFilter} onValueChange={setTypeFilter}>
+              <SelectTrigger className="w-40 h-9">
+                <SelectValue placeholder="Tipo" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="all">Todos los tipos</SelectItem>
+                {PROVIDER_TYPES.map(type => (
+                  <SelectItem key={type.value} value={type.value}>
+                    {type.label}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
 
-              <Select value={categoryFilter} onValueChange={setCategoryFilter}>
-                <SelectTrigger className="w-48">
-                  <SelectValue placeholder="Categoría" />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="all">Todas las categorías</SelectItem>
-                  {PRODUCT_CATEGORIES.map(category => (
-                    <SelectItem key={category} value={category}>
-                      {category}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            </div>
+            <Select value={statusFilter} onValueChange={setStatusFilter}>
+              <SelectTrigger className="w-40 h-9">
+                <SelectValue placeholder="Estado" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="all">Todos los estados</SelectItem>
+                {PROVIDER_STATUS.map(status => (
+                  <SelectItem key={status.value} value={status.value}>
+                    {status.label}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+
+            <Select value={categoryFilter} onValueChange={setCategoryFilter}>
+              <SelectTrigger className="w-48 h-9">
+                <SelectValue placeholder="Categoría" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="all">Todas las categorías</SelectItem>
+                {PRODUCT_CATEGORIES.map(category => (
+                  <SelectItem key={category} value={category}>
+                    {category}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
           </div>
-        </CardContent>
-      </Card>
-
-      {/* Tabla de proveedores */}
-      <Card>
-        <CardHeader>
-          <CardTitle>Lista de Proveedores</CardTitle>
-          <CardDescription>
-            Mostrando {paginatedProviders.length} de {filteredProviders.length} proveedores
-          </CardDescription>
-        </CardHeader>
-        <CardContent>
-          {loading ? (
-            <div className="flex items-center justify-center py-14 gap-2 text-muted-foreground">
-              <RefreshCw className="h-5 w-5 animate-spin" />
-              <span className="text-sm">Cargando proveedores...</span>
-            </div>
-          ) : (
-          <Table>
-            <TableHeader>
-              <TableRow>
-                <TableHead>Proveedor</TableHead>
-                <TableHead>Contacto</TableHead>
-                <TableHead>Estado</TableHead>
-                <TableHead className="text-right">Acciones</TableHead>
-              </TableRow>
-            </TableHeader>
-            <TableBody>
-              {paginatedProviders.map((provider) => {
-                const isInactive = isItemInactive(provider);
-                const inactiveClass = getInactiveItemClassName({ disabled: isInactive });
-                
-                return (
-                <TableRow key={provider.id} className={inactiveClass} title={isInactive ? 'Este proveedor está inactivo' : ''}>
-                  <TableCell>
-                    <div>
-                      <div className="font-medium">{provider.name}</div>
-                      <div className="text-sm text-muted-foreground">{provider.businessName}</div>
-                      <div className="text-xs text-muted-foreground">
-                        {provider.documentType}: {provider.taxId}
-                      </div>
-                    </div>
-                  </TableCell>
-                  <TableCell>
-                    <div className="space-y-1">
-                      <div className="flex items-center gap-1 text-sm">
-                        <Users className="h-3 w-3" />
-                        {provider.contactPerson}
-                      </div>
-                      <div className="flex items-center gap-1 text-sm text-muted-foreground">
-                        <Mail className="h-3 w-3" />
-                        {provider.email}
-                      </div>
-                      {provider.phone && (
-                        <div className="flex items-center gap-1 text-sm text-muted-foreground">
-                          <Phone className="h-3 w-3" />
-                          {provider.phone}
-                        </div>
-                      )}
-                    </div>
-                  </TableCell>
-                  <TableCell>
-                    <div className="flex items-center gap-2">
-                      <Badge className={getStatusColor(provider.status)}>
-                        {provider.status}
-                      </Badge>
-                      <Switch
-                        checked={provider.isActive}
-                        onCheckedChange={() => handleToggleProviderStatus(provider.id)}
-                        size="sm"
-                      />
-                    </div>
-                  </TableCell>
-                  <TableCell className="text-right">
-                    <div className="flex justify-end gap-1">
-                      <Button
-                        variant="ghost"
-                        size="sm"
-                        onClick={() => {
-                          setSelectedProvider(provider);
-                          setProviderProducts([]);
-                          loadProviderProducts(provider.id);
-                          setCurrentView('detail');
-                        }}
-                        title="Ver detalle"
-                      >
-                        <Eye className="h-4 w-4" />
-                      </Button>
-                      <Button
-                        variant="ghost"
-                        size="sm"
-                        onClick={() => openEditModal(provider)}
-                        disabled={!provider.isActive}
-                        title={provider.isActive ? 'Editar proveedor' : 'Proveedor inactivo'}
-                        className={!provider.isActive ? 'opacity-30 cursor-not-allowed' : ''}
-                      >
-                        <Edit className="h-4 w-4" />
-                      </Button>
-                      <AlertDialog>
-                        <AlertDialogTrigger asChild>
-                          <Button
-                            variant="ghost"
-                            size="sm"
-                            disabled={!provider.isActive}
-                            className={`text-destructive hover:text-destructive ${!provider.isActive ? 'opacity-30 cursor-not-allowed' : ''}`}
-                            title={provider.isActive ? 'Eliminar proveedor' : 'Proveedor inactivo'}
-                          >
-                            <Trash2 className="h-4 w-4" />
-                          </Button>
-                        </AlertDialogTrigger>
-                        <AlertDialogContent>
-                          <AlertDialogHeader>
-                            <AlertDialogTitle>¿Eliminar proveedor?</AlertDialogTitle>
-                            <AlertDialogDescription>
-                              Esta acción no se puede deshacer. Se eliminará permanentemente
-                              el proveedor "{provider.name}" y todos sus datos asociados.
-                            </AlertDialogDescription>
-                          </AlertDialogHeader>
-                          <AlertDialogFooter>
-                            <AlertDialogCancel>Cancelar</AlertDialogCancel>
-                            <AlertDialogAction
-                              onClick={() => handleDeleteProvider(provider.id)}
-                              className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
-                            >
-                              Eliminar
-                            </AlertDialogAction>
-                          </AlertDialogFooter>
-                        </AlertDialogContent>
-                      </AlertDialog>
-                    </div>
-                  </TableCell>
-                </TableRow>
-                );
-              })}
-            </TableBody>
-          </Table>
-          )}
-
-          {/* Paginación */}
-          {totalPages > 1 && (
-            <div className="flex items-center justify-between mt-4">
-              <div className="text-sm text-muted-foreground">
-                Página {currentPage} de {totalPages}
-              </div>
-              <div className="flex gap-2">
-                <Button
-                  variant="outline"
-                  size="sm"
-                  onClick={() => setCurrentPage(prev => Math.max(1, prev - 1))}
-                  disabled={currentPage === 1}
-                >
-                  <ChevronLeft className="h-4 w-4" />
-                  Anterior
-                </Button>
-                <Button
-                  variant="outline"
-                  size="sm"
-                  onClick={() => setCurrentPage(prev => Math.min(totalPages, prev + 1))}
-                  disabled={currentPage === totalPages}
-                >
-                  Siguiente
-                  <ChevronRight className="h-4 w-4" />
-                </Button>
-              </div>
-            </div>
-          )}
-        </CardContent>
-      </Card>
+        }
+      />
     </div>
   );
 }

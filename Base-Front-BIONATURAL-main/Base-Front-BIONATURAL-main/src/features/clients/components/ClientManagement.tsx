@@ -5,17 +5,18 @@ import { Input } from '../../../components/ui/input';
 import { Label } from '../../../components/ui/label';
 import { Badge } from '../../../components/ui/badge';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '../../../components/ui/select';
-import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '../../../components/ui/table';
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle, AlertDialogTrigger } from '../../../components/ui/alert-dialog';
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '../../../components/ui/dialog';
 import { Avatar, AvatarFallback } from '../../../components/ui/avatar';
 import { Switch } from '../../../components/ui/switch';
 import { Separator } from '../../../components/ui/separator';
+import { DataTable, Column } from '../../../shared/components/DataTable';
 import { toast } from 'sonner';
 import { getClients, createClient, updateClient, deleteClient, toggleClientStatus } from '../../../lib/api';
+import { useDocumentTypesClient } from '../../../shared/contexts/SystemConfigContext';
 import {
-  Users, Plus, Search, Edit, Trash2, Eye,
-  ChevronLeft, ChevronRight, Mail, Phone,
+  Users, Plus, Edit, Trash2, Eye,
+  ChevronLeft, Mail, Phone,
   MapPin, User, FileText, RefreshCw, AlertTriangle,
   IdCard,
 } from 'lucide-react';
@@ -43,15 +44,6 @@ interface FormData {
   isActive: boolean;
 }
 
-const DOCUMENT_TYPES = [
-  { value: 'CC', label: 'Cédula de Ciudadanía' },
-  { value: 'TI', label: 'Tarjeta de Identidad' },
-  { value: 'CE', label: 'Cédula de Extranjería' },
-  { value: 'PEP', label: 'PEP' },
-  { value: 'NIT', label: 'NIT' },
-  { value: 'Pasaporte', label: 'Pasaporte' },
-];
-
 const ITEMS_PER_PAGE = 8;
 
 const emptyForm: FormData = {
@@ -69,14 +61,11 @@ function fmtDate(d: string) {
 }
 
 export function ClientManagement() {
+  const DOCUMENT_TYPES = useDocumentTypesClient();
   const [clients, setClients] = useState<Client[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const [searchTerm, setSearchTerm] = useState('');
   const [statusFilter, setStatusFilter] = useState('all');
-  const [sortBy, setSortBy] = useState<'name' | 'createdAt'>('createdAt');
-  const [sortOrder, setSortOrder] = useState<'asc' | 'desc'>('desc');
-  const [currentPage, setCurrentPage] = useState(1);
   const [currentView, setCurrentView] = useState<'list' | 'create' | 'edit'>('list');
   const [selectedClient, setSelectedClient] = useState<Client | null>(null);
   const [detailOpen, setDetailOpen] = useState(false);
@@ -87,7 +76,6 @@ export function ClientManagement() {
     try {
       setLoading(true); setError(null);
       const res = await getClients();
-      // Excluir el cliente genérico "Consumidor Final" — solo se usa en ventas en tienda
       if (res.success) setClients(res.data.filter((c: any) => c.name !== 'Consumidor Final'));
     } catch (err: any) {
       setError(err?.message || 'Error al cargar clientes');
@@ -97,19 +85,27 @@ export function ClientManagement() {
 
   useEffect(() => { load(); }, []);
 
-  // Validaciones en tiempo real
   const errors = {
     name: touched.name && !formData.name.trim() ? 'El nombre es obligatorio' : '',
     documentType: touched.documentType && !formData.documentType ? 'Selecciona un tipo' : '',
-    documentNumber: touched.documentNumber && !formData.documentNumber.trim() ? 'El número es obligatorio' : '',
+    documentNumber: touched.documentNumber
+      ? !formData.documentNumber.trim()
+        ? 'El número es obligatorio'
+        : !/^\d{8,15}$/.test(formData.documentNumber.trim())
+          ? '8-15 dígitos numéricos'
+          : ''
+      : '',
     email: touched.email && formData.email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(formData.email) ? 'Email inválido' : '',
+    phone: touched.phone && formData.phone && !/^\+?\d{10,20}$/.test(formData.phone) ? '10-20 dígitos (puede incluir +)' : '',
   };
 
   const touch = (f: keyof FormData) => setTouched(p => ({ ...p, [f]: true }));
 
   const validate = () => {
-    setTouched({ name: true, documentType: true, documentNumber: true, email: true });
-    return !!(formData.name.trim() && formData.documentType && formData.documentNumber.trim() &&
+    setTouched({ name: true, documentType: true, documentNumber: true, email: true, phone: true });
+    const docOk = formData.documentNumber.trim() && /^\d{8,15}$/.test(formData.documentNumber.trim());
+    const phoneOk = !formData.phone || /^\+?\d{10,20}$/.test(formData.phone);
+    return !!(formData.name.trim() && formData.documentType && docOk && phoneOk &&
       !(formData.email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(formData.email)));
   };
 
@@ -124,23 +120,11 @@ export function ClientManagement() {
   };
 
   const filtered = useMemo(() => {
-    let list = clients.filter(c => {
-      const q = searchTerm.toLowerCase();
-      const m = c.name.toLowerCase().includes(q) || (c.email || '').toLowerCase().includes(q) ||
-        (c.phone || '').includes(searchTerm) || (c.documentNumber || '').includes(searchTerm);
+    return clients.filter(c => {
       const ms = statusFilter === 'all' || (statusFilter === 'active' && c.isActive) || (statusFilter === 'inactive' && !c.isActive);
-      return m && ms;
+      return ms;
     });
-    list.sort((a, b) => {
-      const av = sortBy === 'name' ? a.name.toLowerCase() : a.createdAt;
-      const bv = sortBy === 'name' ? b.name.toLowerCase() : b.createdAt;
-      return sortOrder === 'asc' ? (av < bv ? -1 : 1) : (av > bv ? -1 : 1);
-    });
-    return list;
-  }, [clients, searchTerm, statusFilter, sortBy, sortOrder]);
-
-  const totalPages = Math.ceil(filtered.length / ITEMS_PER_PAGE);
-  const paginated = filtered.slice((currentPage - 1) * ITEMS_PER_PAGE, currentPage * ITEMS_PER_PAGE);
+  }, [clients, statusFilter]);
 
   const openCreate = () => { setFormData(emptyForm); setTouched({}); setCurrentView('create'); };
   const openEdit = (c: Client) => {
@@ -183,7 +167,53 @@ export function ClientManagement() {
     } catch (err: any) { toast.error(err?.message || 'Error al eliminar cliente'); }
   };
 
-  // ── Formulario ───────────────────────────────────────────────────────────────
+  const tableColumns: Column<Client>[] = [
+    {
+      header: 'Documento',
+      accessor: (client) => (
+        client.documentType && client.documentNumber
+          ? <div className="text-sm"><span className="font-medium">{client.documentType}</span><p className="text-muted-foreground text-xs">{client.documentNumber}</p></div>
+          : <span className="text-muted-foreground text-sm">—</span>
+      )
+    },
+    {
+      header: 'Nombre',
+      accessor: (client) => (
+        <div className="flex items-center gap-3">
+          <Avatar className="h-8 w-8">
+            <AvatarFallback className={`text-xs ${client.isActive ? 'bg-primary/10 text-primary' : 'bg-muted text-muted-foreground'}`}>
+              {getInitials(client.name)}
+            </AvatarFallback>
+          </Avatar>
+          <p className="font-medium text-sm">{client.name}</p>
+        </div>
+      )
+    },
+    {
+      header: 'Email',
+      accessor: (client) => <span className="text-sm">{client.email || <span className="text-muted-foreground">—</span>}</span>
+    },
+    {
+      header: 'Teléfono',
+      accessor: (client) => <span className="text-sm">{client.phone || <span className="text-muted-foreground">—</span>}</span>
+    },
+    {
+      header: 'Estado',
+      accessor: (client) => (
+        <div className="flex items-center gap-2">
+          <Switch
+            checked={client.isActive}
+            onCheckedChange={() => handleToggleStatus(client)}
+            className="scale-90"
+          />
+          <span className="text-sm text-muted-foreground">
+            {client.isActive ? 'Activo' : 'Inactivo'}
+          </span>
+        </div>
+      )
+    }
+  ];
+
   if (currentView === 'create' || currentView === 'edit') {
     const isEdit = currentView === 'edit';
     return (
@@ -195,23 +225,19 @@ export function ClientManagement() {
         </div>
 
         <div className="w-full max-w-sm border rounded-xl shadow-sm bg-card overflow-hidden">
-          {/* Header */}
           <div className="bg-primary/5 border-b px-4 py-3 flex items-center gap-3">
             <div className="flex h-8 w-8 items-center justify-center rounded-full bg-primary/15 shrink-0">
               <User className="h-4 w-4 text-primary" />
             </div>
             <div>
-              <p className="font-semibold text-sm">{isEdit ? 'Editar Cliente' : 'Registrar Cliente'}</p>
+              <p className="font-semibold text-sm">{isEdit ? 'Editar Cliente' : 'Nuevo Cliente'}</p>
               <p className="text-xs text-muted-foreground">
                 {isEdit ? selectedClient?.name : 'Los campos con * son obligatorios'}
               </p>
             </div>
           </div>
 
-          {/* Campos */}
           <div className="px-4 py-4 space-y-3">
-
-            {/* Tipo + Número documento — PRIMERO */}
             <div className="grid grid-cols-2 gap-2">
               <div className="space-y-1">
                 <Label htmlFor="docType" className="text-xs font-medium">
@@ -241,7 +267,6 @@ export function ClientManagement() {
               </div>
             </div>
 
-            {/* Dígito de verificación — solo para NIT */}
             {formData.documentType === 'NIT' && (
               <div className="space-y-1">
                 <Label htmlFor="digitoVerif" className="text-xs font-medium">
@@ -258,11 +283,9 @@ export function ClientManagement() {
                   maxLength={1}
                   className="h-9 text-sm shadow-sm w-24"
                   inputMode="numeric" />
-                <p className="text-xs text-muted-foreground">Número del 0 al 9 que valida el NIT</p>
               </div>
             )}
 
-            {/* Nombre — cambia según tipo de documento */}
             <div className="space-y-1">
               <Label htmlFor="name" className="text-xs font-medium">
                 {formData.documentType === 'NIT' ? 'Razón Social' : 'Nombre completo'} <span className="text-destructive">*</span>
@@ -275,7 +298,6 @@ export function ClientManagement() {
               {errors.name && <p className="text-xs text-destructive flex items-center gap-1"><AlertTriangle className="h-3 w-3" />{errors.name}</p>}
             </div>
 
-            {/* Persona de contacto — solo para NIT */}
             {formData.documentType === 'NIT' && (
               <div className="space-y-1">
                 <Label htmlFor="contactName" className="text-xs font-medium">Nombre del representante</Label>
@@ -295,7 +317,6 @@ export function ClientManagement() {
               </div>
             )}
 
-            {/* Email */}
             <div className="space-y-1">
               <Label htmlFor="email" className="text-xs font-medium">
                 {formData.documentType === 'NIT' ? 'Email corporativo' : 'Email'}
@@ -308,7 +329,6 @@ export function ClientManagement() {
               {errors.email && <p className="text-xs text-destructive flex items-center gap-1"><AlertTriangle className="h-3 w-3" />{errors.email}</p>}
             </div>
 
-            {/* Teléfono — solo para personas naturales; para NIT ya está en contacto */}
             {formData.documentType !== 'NIT' && (
               <div className="space-y-1">
                 <Label htmlFor="phone" className="text-xs font-medium">Teléfono</Label>
@@ -319,7 +339,6 @@ export function ClientManagement() {
               </div>
             )}
 
-            {/* Teléfono empresa — para NIT */}
             {formData.documentType === 'NIT' && (
               <div className="space-y-1">
                 <Label htmlFor="phoneEmp" className="text-xs font-medium">Teléfono empresa</Label>
@@ -331,7 +350,6 @@ export function ClientManagement() {
               </div>
             )}
 
-            {/* Dirección */}
             <div className="space-y-1">
               <Label htmlFor="address" className="text-xs font-medium">
                 {formData.documentType === 'NIT' ? 'Dirección sede principal' : 'Dirección'}
@@ -353,7 +371,6 @@ export function ClientManagement() {
                 className="h-9 text-sm shadow-sm" />
             </div>
 
-            {/* Estado */}
             <div className="flex items-center justify-between rounded-lg border px-3 py-2 shadow-sm">
               <div>
                 <p className="text-xs font-medium">Estado</p>
@@ -362,10 +379,9 @@ export function ClientManagement() {
               <Switch checked={formData.isActive} onCheckedChange={v => setFormData(p => ({ ...p, isActive: v }))} />
             </div>
 
-            {/* Botones */}
             <div className="flex gap-2 pt-1">
               <Button onClick={isEdit ? handleUpdate : handleCreate} className="flex-1 h-9 text-sm">
-                {isEdit ? <><Edit className="h-3.5 w-3.5 mr-1.5" />Actualizar</> : <><Plus className="h-3.5 w-3.5 mr-1.5" />Registrar</>}
+                {isEdit ? <><Edit className="h-3.5 w-3.5 mr-1.5" />Actualizar</> : <><Plus className="h-3.5 w-3.5 mr-1.5" />Guardar</>}
               </Button>
               <Button variant="outline" onClick={cancel} className="flex-1 h-9 text-sm">Cancelar</Button>
             </div>
@@ -375,7 +391,6 @@ export function ClientManagement() {
     );
   }
 
-  // ── Vista principal ───────────────────────────────────────────────────────────
   return (
     <div className="space-y-6">
       <div className="flex items-center justify-between">
@@ -383,13 +398,12 @@ export function ClientManagement() {
           <h2 className="text-2xl font-semibold flex items-center gap-2">
             <Users className="h-6 w-6" />Gestión de Clientes
           </h2>
-          <p className="text-muted-foreground">Administra la base de datos de clientes ({filtered.length} registros)</p>
         </div>
         <div className="flex gap-2">
           <Button variant="outline" onClick={load} disabled={loading}>
             <RefreshCw className={`h-4 w-4 mr-2 ${loading ? 'animate-spin' : ''}`} />Actualizar
           </Button>
-          <Button onClick={openCreate}><Plus className="h-4 w-4 mr-2" />Registrar Cliente</Button>
+          <Button onClick={openCreate}><Plus className="h-4 w-4 mr-2" />Nuevo Cliente</Button>
         </div>
       </div>
 
@@ -402,169 +416,40 @@ export function ClientManagement() {
         </Card>
       )}
 
-      <Card>
-        <CardContent className="p-4">
-          <div className="flex flex-col md:flex-row gap-4">
-            <div className="relative flex-1">
-              <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
-              <Input placeholder="Buscar por nombre, email, teléfono o documento..."
-                value={searchTerm} onChange={e => { setSearchTerm(e.target.value); setCurrentPage(1); }} className="pl-10" />
-            </div>
-            <Select value={statusFilter} onValueChange={v => { setStatusFilter(v); setCurrentPage(1); }}>
-              <SelectTrigger className="w-40"><SelectValue placeholder="Estado" /></SelectTrigger>
-              <SelectContent>
-                <SelectItem value="all">Todos</SelectItem>
-                <SelectItem value="active">Activos</SelectItem>
-                <SelectItem value="inactive">Inactivos</SelectItem>
-              </SelectContent>
-            </Select>
-            <Select value={`${sortBy}-${sortOrder}`} onValueChange={v => { const [f, o] = v.split('-'); setSortBy(f as any); setSortOrder(o as any); }}>
-              <SelectTrigger className="w-44"><SelectValue placeholder="Ordenar" /></SelectTrigger>
-              <SelectContent>
-                <SelectItem value="name-asc">Nombre A-Z</SelectItem>
-                <SelectItem value="name-desc">Nombre Z-A</SelectItem>
-                <SelectItem value="createdAt-desc">Más reciente</SelectItem>
-                <SelectItem value="createdAt-asc">Más antiguo</SelectItem>
-              </SelectContent>
-            </Select>
-          </div>
-        </CardContent>
-      </Card>
+      <DataTable
+        title="Clientes"
+        description={`Mostrando ${filtered.length} clientes`}
+        data={filtered}
+        columns={tableColumns}
+        searchableKeys={['name', 'email', 'phone', 'documentNumber']}
+        searchPlaceholder="Buscar por nombre, email, teléfono o documento..."
+        itemsPerPage={ITEMS_PER_PAGE}
+        onEdit={(c) => c.isActive ? openEdit(c) : toast.error('Cliente inactivo')}
+        onDelete={(c) => c.isActive ? handleDelete(c) : toast.error('Cliente inactivo')}
+        isLoading={loading}
+        customActions={(client) => (
+          <Button
+            variant="ghost" size="sm"
+            onClick={() => client.isActive && openDetail(client)}
+            disabled={!client.isActive}
+            title={client.isActive ? 'Ver detalle' : 'Cliente inactivo'}
+            className={!client.isActive ? 'opacity-30 h-8 w-8' : 'h-8 w-8'}
+          >
+            <Eye className="h-4 w-4" />
+          </Button>
+        )}
+        extraFilters={
+          <Select value={statusFilter} onValueChange={setStatusFilter}>
+            <SelectTrigger className="w-40 h-9"><SelectValue placeholder="Estado" /></SelectTrigger>
+            <SelectContent>
+              <SelectItem value="all">Todos los estados</SelectItem>
+              <SelectItem value="active">Activos</SelectItem>
+              <SelectItem value="inactive">Inactivos</SelectItem>
+            </SelectContent>
+          </Select>
+        }
+      />
 
-      <Card>
-        <CardHeader>
-          <CardTitle>Lista de Clientes</CardTitle>
-          <CardDescription>Mostrando {paginated.length} de {filtered.length} clientes</CardDescription>
-        </CardHeader>
-        <CardContent>
-          {loading ? (
-            <div className="flex items-center justify-center py-12 gap-2 text-muted-foreground">
-              <RefreshCw className="h-5 w-5 animate-spin" /><span>Cargando clientes...</span>
-            </div>
-          ) : paginated.length === 0 ? (
-            <div className="text-center py-12 text-muted-foreground">
-              <Users className="h-12 w-12 mx-auto mb-3 opacity-30" />
-              <p>No se encontraron clientes</p>
-              {searchTerm && <p className="text-sm">Intenta con otro término de búsqueda</p>}
-            </div>
-          ) : (
-            <Table>
-              <TableHeader>
-                <TableRow>
-                  <TableHead>Documento</TableHead>
-                  <TableHead>Nombre</TableHead>
-                  <TableHead>Email</TableHead>
-                  <TableHead>Teléfono</TableHead>
-                  <TableHead>Estado</TableHead>
-                  <TableHead className="text-right">Acciones</TableHead>
-                </TableRow>
-              </TableHeader>
-              <TableBody>
-                {paginated.map(client => (
-                  <TableRow key={client.id} className={!client.isActive ? 'opacity-60' : ''}>
-                    <TableCell>
-                      {client.documentType && client.documentNumber
-                        ? <div className="text-sm"><span className="font-medium">{client.documentType}</span><p className="text-muted-foreground text-xs">{client.documentNumber}</p></div>
-                        : <span className="text-muted-foreground text-sm">—</span>}
-                    </TableCell>
-                    <TableCell>
-                      <div className="flex items-center gap-3">
-                        <Avatar className="h-8 w-8">
-                          <AvatarFallback className={`text-xs ${client.isActive ? 'bg-primary/10 text-primary' : 'bg-muted text-muted-foreground'}`}>
-                            {getInitials(client.name)}
-                          </AvatarFallback>
-                        </Avatar>
-                        <p className="font-medium text-sm">{client.name}</p>
-                      </div>
-                    </TableCell>
-                    <TableCell className="text-sm">{client.email || <span className="text-muted-foreground">—</span>}</TableCell>
-                    <TableCell className="text-sm">{client.phone || <span className="text-muted-foreground">—</span>}</TableCell>
-                    {/* Estado: toggle + texto */}
-                    <TableCell>
-                      <div className="flex items-center gap-2">
-                        <Switch
-                          checked={client.isActive}
-                          onCheckedChange={() => handleToggleStatus(client)}
-                          className="scale-90"
-                        />
-                        <span className="text-sm text-muted-foreground">
-                          {client.isActive ? 'Activo' : 'Inactivo'}
-                        </span>
-                      </div>
-                    </TableCell>
-                    {/* Acciones: bloqueadas si inactivo, excepto el toggle */}
-                    <TableCell className="text-right">
-                      <div className="flex items-center justify-end gap-1">
-                        {/* Ver detalle */}
-                        <Button
-                          variant="ghost" size="sm"
-                          onClick={() => client.isActive && openDetail(client)}
-                          disabled={!client.isActive}
-                          title={client.isActive ? 'Ver detalle' : 'Cliente inactivo'}
-                          className={!client.isActive ? 'opacity-30 cursor-not-allowed' : ''}
-                        >
-                          <Eye className="h-4 w-4 text-muted-foreground" />
-                        </Button>
-                        {/* Editar */}
-                        <Button
-                          variant="ghost" size="sm"
-                          onClick={() => client.isActive && openEdit(client)}
-                          disabled={!client.isActive}
-                          title={client.isActive ? 'Editar' : 'Cliente inactivo'}
-                          className={!client.isActive ? 'opacity-30 cursor-not-allowed' : ''}
-                        >
-                          <Edit className="h-4 w-4 text-muted-foreground" />
-                        </Button>
-                        {/* Eliminar — solo si activo */}
-                        {client.isActive ? (
-                          <AlertDialog>
-                            <AlertDialogTrigger asChild>
-                              <Button variant="ghost" size="sm" title="Eliminar">
-                                <Trash2 className="h-4 w-4 text-destructive" />
-                              </Button>
-                            </AlertDialogTrigger>
-                            <AlertDialogContent>
-                              <AlertDialogHeader>
-                                <AlertDialogTitle>¿Eliminar cliente?</AlertDialogTitle>
-                                <AlertDialogDescription>
-                                  Esta acción eliminará permanentemente a <strong>{client.name}</strong>. No se puede deshacer.
-                                </AlertDialogDescription>
-                              </AlertDialogHeader>
-                              <AlertDialogFooter>
-                                <AlertDialogCancel>Cancelar</AlertDialogCancel>
-                                <AlertDialogAction onClick={() => handleDelete(client)} className="bg-destructive text-destructive-foreground hover:bg-destructive/90">Eliminar</AlertDialogAction>
-                              </AlertDialogFooter>
-                            </AlertDialogContent>
-                          </AlertDialog>
-                        ) : (
-                          <Button variant="ghost" size="sm" disabled title="Cliente inactivo" className="opacity-30 cursor-not-allowed">
-                            <Trash2 className="h-4 w-4 text-destructive" />
-                          </Button>
-                        )}
-                      </div>
-                    </TableCell>
-                  </TableRow>
-                ))}
-              </TableBody>
-            </Table>
-          )}
-          {totalPages > 1 && (
-            <div className="flex items-center justify-between mt-4">
-              <p className="text-sm text-muted-foreground">Página {currentPage} de {totalPages}</p>
-              <div className="flex gap-2">
-                <Button variant="outline" size="sm" onClick={() => setCurrentPage(p => Math.max(1, p - 1))} disabled={currentPage === 1}>
-                  <ChevronLeft className="h-4 w-4" />Anterior
-                </Button>
-                <Button variant="outline" size="sm" onClick={() => setCurrentPage(p => Math.min(totalPages, p + 1))} disabled={currentPage === totalPages}>
-                  Siguiente<ChevronRight className="h-4 w-4" />
-                </Button>
-              </div>
-            </div>
-          )}
-        </CardContent>
-      </Card>
-
-      {/* Modal detalle */}
       <Dialog open={detailOpen} onOpenChange={setDetailOpen}>
         <DialogContent className="max-w-md">
           <DialogHeader>
@@ -591,7 +476,6 @@ export function ClientManagement() {
                 <div className="flex items-center gap-2"><Phone className="h-4 w-4 text-muted-foreground shrink-0" /><div><p className="text-xs text-muted-foreground">Teléfono</p><p className="font-medium">{selectedClient.phone || '—'}</p></div></div>
                 <div className="flex items-center gap-2"><MapPin className="h-4 w-4 text-muted-foreground shrink-0" /><div><p className="text-xs text-muted-foreground">Dirección</p><p className="font-medium">{selectedClient.documentType === 'NIT' ? (selectedClient.address?.split('||').find(p => p.startsWith('DIR:'))?.slice(4) || '—') : (selectedClient.address || '—')}</p></div></div>
 
-                {/* Datos adicionales para NIT */}
                 {selectedClient.documentType === 'NIT' && (
                   <>
                     <Separator />

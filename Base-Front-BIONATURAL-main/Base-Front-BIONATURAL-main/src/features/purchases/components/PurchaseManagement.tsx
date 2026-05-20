@@ -10,11 +10,19 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '.
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '../../../components/ui/dialog';
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle, AlertDialogTrigger } from '../../../components/ui/alert-dialog';
 import { Separator } from '../../../components/ui/separator';
+import { cn } from '../../../components/ui/utils';
+import { DataTable, Column } from '../../../shared/components/DataTable';
 import { toast } from 'sonner';
 import { getPurchases, getProviders, getProducts, createPurchase, updatePurchaseStatus, apiFetch } from '../../../lib/api';
+import { usePurchaseStatuses } from '../../../shared/contexts/SystemConfigContext';
+import {
+  Row, Col, Card as AntCard, Table as AntTable, Select as AntSelect,
+  InputNumber, Button as AntButton, Typography, Divider, Space,
+  Badge as AntBadge
+} from 'antd';
 import {
   ShoppingCart, Plus, Search, Eye, ChevronLeft, ChevronRight,
-  Building2, Package, RefreshCw, Trash2, X, CheckCircle, XCircle, Clock, Ban, Download, FileText
+  Building2, Package, RefreshCw, Trash2, X, CheckCircle, XCircle, Clock, Ban, Download, FileText, User, DollarSign, Store
 } from 'lucide-react';
 
 // ── Tipos ──────────────────────────────────────────────────────────────────────
@@ -33,7 +41,7 @@ interface ApiPurchaseItem {
   id: number;
   productId: number;
   quantity: number;
-  unitPrice: number;
+  unitCost: number;   // campo real en BD (antes llamado unitPrice en el frontend)
   lineTotal: number;
   product: { id: number; name: string; sku: string | null; image: string | null };
 }
@@ -45,9 +53,10 @@ interface CartItem {
   quantity: number;
   unitPrice: number;
   lineTotal: number;
+  minStock?: number;
 }
 
-const STATUS_MAP: Record<string, { label: string; color: string; iconName: string }> = {
+const STATUS_MAP_FALLBACK: Record<string, { label: string; color: string; iconName: string }> = {
   REGISTERED: { label: 'Registrada',  color: 'bg-blue-100 text-blue-800',   iconName: 'clock' },
   COMPLETED:  { label: 'Completada',  color: 'bg-green-100 text-green-800', iconName: 'check' },
   CANCELLED:  { label: 'Cancelada',   color: 'bg-gray-100 text-gray-800',   iconName: 'x' },
@@ -259,7 +268,7 @@ async function generatePurchasePDF(purchase: ApiPurchase): Promise<string> {
     item.product?.name || '—',
     item.product?.sku || '—',
     String(item.quantity),
-    formatCOP(Number(item.unitPrice)),
+    formatCOP(Number((item as any).unitPrice || item.unitCost)),
     formatCOP(Number(item.lineTotal)),
   ]);
 
@@ -315,13 +324,21 @@ async function generatePurchasePDF(purchase: ApiPurchase): Promise<string> {
 
 // ── Componente principal ───────────────────────────────────────────────────────
 export function PurchaseManagement() {
+  const purchaseStatuses = usePurchaseStatuses();
+  // Construir STATUS_MAP desde la BD
+  const STATUS_MAP: Record<string, { label: string; color: string; iconName: string }> = Object.fromEntries(
+    purchaseStatuses.map(s => [s.value, {
+      label: s.label,
+      color: s.color,
+      iconName: s.value === 'REGISTERED' ? 'clock' : s.value === 'COMPLETED' ? 'check' : 'x',
+    }])
+  );
+
   const [purchases, setPurchases] = useState<ApiPurchase[]>([]);
   const [providers, setProviders] = useState<any[]>([]);
   const [products, setProducts] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
-  const [searchTerm, setSearchTerm] = useState('');
   const [statusFilter, setStatusFilter] = useState('all');
-  const [currentPage, setCurrentPage] = useState(1);
 
   // Vista
   const [view, setView] = useState<'list' | 'create' | 'detail'>('list');
@@ -334,6 +351,8 @@ export function PurchaseManagement() {
   const [cart, setCart] = useState<CartItem[]>([]);
   const [productSearch, setProductSearch] = useState('');
   const [creating, setCreating] = useState(false);
+  const [tempProduct, setTempProduct] = useState<any | null>(null);
+  const [tempQuantity, setTempQuantity] = useState<number>(1);
   // Productos del proveedor seleccionado
   const [providerProducts, setProviderProducts] = useState<any[]>([]);
   const [loadingProviderProducts, setLoadingProviderProducts] = useState(false);
@@ -345,7 +364,16 @@ export function PurchaseManagement() {
       setLoadingProviderProducts(true);
       const res = await apiFetch<any>(`/providers/${pid}`);
       if (res.success) {
-        setProviderProducts(res.data.products || []);
+        const rawProducts = res.data.products || [];
+        // Enriquecer con minStock de la lista global si falta en la respuesta del proveedor
+        const enriched = rawProducts.map((p: any) => {
+          const globalProd = products.find(gp => gp.id === p.id);
+          return {
+            ...p,
+            minStock: p.minStock !== undefined ? p.minStock : (globalProd?.minStock || 0)
+          };
+        });
+        setProviderProducts(enriched);
       }
     } catch { setProviderProducts([]); }
     finally { setLoadingProviderProducts(false); }
@@ -440,28 +468,39 @@ export function PurchaseManagement() {
     link.click();
   };
   const filtered = purchases.filter(p => {
-    const matchSearch = p.provider.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
-      String(p.id).includes(searchTerm);
     const matchStatus = statusFilter === 'all' || p.status === statusFilter;
-    return matchSearch && matchStatus;
+    return matchStatus;
   });
-  const totalPages = Math.ceil(filtered.length / ITEMS_PER_PAGE);
-  const paginated = filtered.slice((currentPage - 1) * ITEMS_PER_PAGE, currentPage * ITEMS_PER_PAGE);
+
+  const dataForTable = filtered.map(p => ({
+    ...p,
+    providerName: p.provider?.name || '',
+    orderNumber: `#${p.id}`
+  }));
 
   // ── Carrito ────────────────────────────────────────────────────────────────
-  const addToCart = (product: any) => {
-    if (cart.find(c => c.productId === product.id)) {
-      toast.error('Este producto ya está en la orden');
-      return;
+  const addToCart = (product: any, qty: number = 1) => {
+    const min = Number(product.minStock) || 1;
+    const initialQty = Math.max(qty, min);
+
+    const existing = cart.find(c => c.productId === product.id);
+    if (existing) {
+      const newQty = existing.quantity + qty;
+      setCart(prev => prev.map(item => item.productId === product.id 
+        ? { ...item, quantity: newQty, lineTotal: Math.round(newQty * item.unitPrice * 100) / 100 }
+        : item
+      ));
+    } else {
+      setCart(prev => [...prev, {
+        productId: product.id,
+        productName: product.name,
+        sku: product.sku || '',
+        quantity: initialQty,
+        unitPrice: Number(product.cost) || Number(product.price) || 0,
+        lineTotal: Math.round(initialQty * (Number(product.cost) || Number(product.price) || 0) * 100) / 100,
+        minStock: min
+      }]);
     }
-    setCart(prev => [...prev, {
-      productId: product.id,
-      productName: product.name,
-      sku: product.sku || '',
-      quantity: 1,
-      unitPrice: Number(product.cost) || Number(product.price) || 0,
-      lineTotal: Number(product.cost) || Number(product.price) || 0,
-    }]);
     setProductSearch('');
   };
 
@@ -544,176 +583,283 @@ export function PurchaseManagement() {
   // ── Vista: Crear compra ────────────────────────────────────────────────────
   if (view === 'create') {
     return (
-      <div className="flex flex-col items-center justify-center py-6 px-4">
-        <div className="w-full max-w-lg mb-2">
-          <Button variant="ghost" size="sm" onClick={() => { setView('list'); setProviderId(''); setNotes(''); setCart([]); setProviderProducts([]); }}
-            className="text-muted-foreground -ml-2">
-            <ChevronLeft className="h-4 w-4 mr-1" /> Volver al listado
-          </Button>
+      <div className="h-[calc(100vh-100px)] p-4 bg-[#f8fafc]">
+        <div className="flex items-center justify-between mb-4">
+          <div className="flex items-center gap-3">
+            <AntButton 
+              icon={<ChevronLeft className="h-4 w-4" />} 
+              onClick={() => { setView('list'); setProviderId(''); setNotes(''); setCart([]); setProviderProducts([]); }}
+              className="border-none shadow-none bg-white hover:bg-slate-100"
+            />
+            <Typography.Title level={4} style={{ margin: 0, fontWeight: 900, color: '#1e293b' }}>
+              NUEVA ORDEN DE COMPRA
+            </Typography.Title>
+          </div>
+          <div className="flex items-center gap-4 bg-white px-4 py-2 rounded-2xl shadow-sm border border-slate-100">
+            <Typography.Text strong className="text-slate-400 text-[10px] uppercase tracking-widest text-primary">ENTRADA DE MERCANCÍA</Typography.Text>
+          </div>
         </div>
 
-        <div className="w-full max-w-lg border rounded-xl shadow-sm bg-card overflow-hidden">
-          {/* Header */}
-          <div className="bg-primary/5 border-b px-4 py-3 flex items-center gap-3">
-            <div className="flex h-8 w-8 items-center justify-center rounded-full bg-primary/15 shrink-0">
-              <ShoppingCart className="h-4 w-4 text-primary" />
-            </div>
-            <div>
-              <p className="font-semibold text-sm">Nueva Orden de Compra</p>
-              <p className="text-xs text-muted-foreground">Los campos con * son obligatorios</p>
-            </div>
-          </div>
+        <Row gutter={[16, 16]} className="h-[calc(100%-60px)]">
+          {/* LADO IZQUIERDO: BÚSQUEDA Y PRODUCTOS DEL PROVEEDOR */}
+          <Col span={14} className="h-full flex flex-col gap-4 overflow-hidden">
+            <AntCard className="rounded-[1.5rem] shadow-sm border-none overflow-hidden shrink-0">
+              <div className="p-4 space-y-4">
+                <Typography.Text strong className="text-[10px] text-slate-400 uppercase tracking-widest flex items-center gap-2">
+                  <Building2 className="h-3 w-3 text-primary" /> Información del Proveedor
+                </Typography.Text>
+                
+                <div className="flex gap-4 items-end">
+                  <div className="flex-1">
+                    <Typography.Text className="text-[10px] font-bold text-slate-500 mb-1.5 block">Seleccionar Proveedor <span className="text-destructive">*</span></Typography.Text>
+                    <AntSelect
+                      showSearch
+                      placeholder="Busca y selecciona un proveedor..."
+                      className="w-full h-12"
+                      optionFilterProp="children"
+                      value={providerId || undefined}
+                      onChange={handleProviderChange}
+                      filterOption={(input, option) =>
+                        (option?.label ?? '').toLowerCase().includes(input.toLowerCase())
+                      }
+                      options={providers.map(p => ({
+                        value: String(p.id),
+                        label: p.name,
+                      }))}
+                      suffixIcon={<Building2 className="h-4 w-4 text-slate-300" />}
+                    />
+                  </div>
+                </div>
+              </div>
+            </AntCard>
 
-          <div className="px-4 py-4 space-y-4">
-
-            {/* Proveedor */}
-            <div className="space-y-1">
-              <Label className="text-xs font-medium">Proveedor <span className="text-destructive">*</span></Label>
-              <Select value={providerId} onValueChange={handleProviderChange}>
-                <SelectTrigger className="h-9 text-sm shadow-sm">
-                  <SelectValue placeholder="Seleccionar proveedor..." />
-                </SelectTrigger>
-                <SelectContent>
-                  {providers.map(p => (
-                    <SelectItem key={p.id} value={String(p.id)} className="text-sm">{p.name}</SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            </div>
-
-            {/* Notas */}
-            <div className="space-y-1">
-              <Label className="text-xs font-medium">Notas <span className="text-muted-foreground font-normal">(opcional)</span></Label>
-              <Textarea value={notes} onChange={e => setNotes(e.target.value)}
-                placeholder="Observaciones de la orden..." rows={2} className="text-sm resize-none shadow-sm" />
-            </div>
-
-            <Separator />
-
-            {/* Productos del proveedor */}
-            <div className="space-y-2">
-              <div className="flex items-center justify-between">
-                <Label className="text-xs font-medium">
-                  Productos <span className="text-destructive">*</span>
-                </Label>
-                {providerId && !loadingProviderProducts && (
-                  <span className="text-xs text-muted-foreground">
-                    {providerProducts.length} disponible{providerProducts.length !== 1 ? 's' : ''}
-                  </span>
+            <AntCard className="rounded-[1.5rem] shadow-sm border-none flex-1 overflow-hidden flex flex-col">
+              <div className="p-4 border-b border-slate-50 shrink-0 flex items-center justify-between">
+                <Typography.Text strong className="text-[10px] text-slate-400 uppercase tracking-widest flex items-center gap-2">
+                  <Package className="h-3 w-3 text-primary" /> Catálogo del Proveedor
+                </Typography.Text>
+                {providerId && (
+                  <div className="relative w-64">
+                    <AntSelect
+                      showSearch
+                      placeholder="Buscar en catálogo..."
+                      className="w-full h-9"
+                      optionFilterProp="children"
+                      value={tempProduct?.id}
+                      onChange={(id) => {
+                        const product = providerProducts.find(p => p.id === id);
+                        if (product) addToCart(product);
+                      }}
+                      filterOption={(input, option) =>
+                        (option?.label ?? '').toLowerCase().includes(input.toLowerCase())
+                      }
+                      options={providerProducts.map(p => ({
+                        value: p.id,
+                        label: `${p.name} - ${p.sku || 'S/S'}`,
+                      }))}
+                      suffixIcon={<Search className="h-3 w-3 text-slate-300" />}
+                    />
+                  </div>
                 )}
               </div>
 
-              {!providerId ? (
-                <div className="rounded-lg border bg-muted/30 px-3 py-4 text-center">
-                  <Building2 className="h-6 w-6 text-muted-foreground mx-auto mb-1" />
-                  <p className="text-xs text-muted-foreground">Selecciona un proveedor para ver los productos disponibles</p>
-                </div>
-              ) : loadingProviderProducts ? (
-                <div className="flex items-center justify-center py-4 gap-2 text-muted-foreground">
-                  <RefreshCw className="h-4 w-4 animate-spin" /><span className="text-sm">Cargando productos...</span>
-                </div>
-              ) : providerProducts.length === 0 ? (
-                <div className="rounded-lg border bg-muted/30 px-3 py-4 text-center">
-                  <Package className="h-6 w-6 text-muted-foreground mx-auto mb-1" />
-                  <p className="text-xs text-muted-foreground">No hay productos activos disponibles</p>
-                </div>
-              ) : (
-                <>
-                  <div className="relative">
-                    <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground pointer-events-none z-10" />
-                    <Input value={productSearch} onChange={e => setProductSearch(e.target.value)}
-                      placeholder="Filtrar por nombre o SKU..." style={{ paddingLeft: '2.25rem' }} className="h-9 text-sm shadow-sm" />
+              <div className="flex-1 overflow-y-auto p-4 scrollbar-thin">
+                {!providerId ? (
+                  <div className="h-full flex flex-col items-center justify-center text-slate-400 gap-3 opacity-60">
+                    <Building2 className="h-12 w-12" />
+                    <p className="text-sm font-bold">Selecciona un proveedor primero</p>
                   </div>
-                  <div className="border rounded-lg divide-y max-h-44 overflow-y-auto shadow-sm">
-                    {filteredProducts.length === 0 ? (
-                      <p className="text-xs text-muted-foreground text-center py-3">Sin resultados</p>
-                    ) : filteredProducts.map(p => {
-                      const inCart = !!cart.find(c => c.productId === p.id);
-                      return (
-                        <button key={p.id} type="button" onClick={() => !inCart && addToCart(p)}
-                          disabled={inCart}
-                          className="w-full flex items-center gap-3 px-3 py-2 hover:bg-muted/50 text-left transition-colors disabled:opacity-40 disabled:cursor-not-allowed">
-                          {p.image
-                            ? <img src={p.image} alt={p.name} className="w-8 h-8 rounded object-cover shrink-0" />
-                            : <div className="w-8 h-8 rounded bg-muted flex items-center justify-center shrink-0"><Package className="h-4 w-4 text-muted-foreground" /></div>
-                          }
-                          <div className="flex-1 min-w-0">
-                            <p className="text-sm font-medium truncate">{p.name}</p>
-                            <p className="text-xs text-muted-foreground truncate">
-                              {p.sku || 'Sin SKU'} · Stock: {p.stock}
-                            </p>
+                ) : loadingProviderProducts ? (
+                  <div className="h-full flex flex-col items-center justify-center text-primary gap-3">
+                    <RefreshCw className="h-8 w-8 animate-spin" />
+                    <p className="text-sm font-bold tracking-widest uppercase">Cargando catálogo...</p>
+                  </div>
+                ) : providerProducts.length === 0 ? (
+                  <div className="h-full flex flex-col items-center justify-center text-slate-400 gap-3 opacity-60">
+                    <Package className="h-12 w-12" />
+                    <p className="text-sm font-bold">Este proveedor no tiene productos vinculados</p>
+                  </div>
+                ) : (
+                  <AntTable 
+                    dataSource={providerProducts}
+                    rowKey="id"
+                    pagination={false}
+                    size="small"
+                    className="rounded-lg overflow-hidden"
+                    columns={[
+                      { 
+                        title: <span className="text-[10px] font-black uppercase text-slate-400">Producto</span>,
+                        dataIndex: 'name',
+                        render: (name, p) => (
+                          <div className="flex flex-col">
+                            <span className="font-black text-slate-700 text-xs">{name}</span>
+                            <span className="text-[9px] text-slate-400 font-bold">{p.sku || 'S/S'}</span>
                           </div>
-                          <span className="text-xs font-medium text-muted-foreground shrink-0">
-                            {formatCOP(Number(p.cost) || Number(p.price))}
-                          </span>
-                          {inCart && <Badge variant="secondary" className="text-xs shrink-0">Agregado</Badge>}
-                        </button>
-                      );
-                    })}
-                  </div>
-                </>
-              )}
-            </div>
+                        )
+                      },
+                      { 
+                        title: <span className="text-[10px] font-black uppercase text-slate-400">Stock Act.</span>,
+                        dataIndex: 'stock',
+                        width: 80,
+                        render: (stock) => <AntBadge count={stock} overflowCount={999} style={{ backgroundColor: '#64748b', fontSize: '9px' }} />
+                      },
+                      { 
+                        title: <span className="text-[10px] font-black uppercase text-slate-400">Stock Min.</span>,
+                        dataIndex: 'minStock',
+                        width: 80,
+                        render: (min) => <span className="text-[10px] font-bold text-slate-500">{min || 0}</span>
+                      },
+                      { 
+                        title: <span className="text-[10px] font-black uppercase text-slate-400">Últ. Costo</span>,
+                        dataIndex: 'cost',
+                        render: (cost, p) => <span className="font-black text-primary text-xs">{formatCOP(Number(cost) || Number(p.price))}</span>
+                      },
+                      { 
+                        title: '',
+                        width: 50,
+                        render: (_, p) => (
+                          <AntButton 
+                            type="text" 
+                            icon={<Plus className="h-4 w-4 text-primary" />} 
+                            className="hover:bg-primary/5"
+                            onClick={() => addToCart(p)}
+                          />
+                        )
+                      }
+                    ]}
+                  />
+                )}
+              </div>
+            </AntCard>
+          </Col>
 
-            {/* Carrito */}
-            {cart.length > 0 && (
-              <>
-                <Separator />
-                <div className="space-y-2">
-                  <Label className="text-xs font-medium">Productos seleccionados ({cart.length})</Label>
-                  <div className="space-y-2">
-                    {cart.map(item => (
-                      <div key={item.productId} className="rounded-lg border shadow-sm bg-muted/20 px-3 py-2.5 space-y-2">
-                        <div className="flex items-center justify-between">
-                          <p className="text-sm font-medium truncate flex-1">{item.productName}</p>
-                          <Button variant="ghost" size="icon" className="h-6 w-6 shrink-0 ml-2"
-                            onClick={() => removeFromCart(item.productId)}>
-                            <X className="h-3.5 w-3.5 text-destructive" />
-                          </Button>
-                        </div>
-                        <div className="grid grid-cols-2 gap-2">
-                          <div className="space-y-1">
-                            <Label className="text-xs text-muted-foreground">Cantidad <span className="text-destructive">*</span></Label>
-                            <Input type="number" min={1} value={item.quantity}
-                              onChange={e => updateCartItem(item.productId, 'quantity', Math.max(1, Number(e.target.value)))}
-                              className="h-8 text-sm shadow-sm" />
-                          </div>
-                          <div className="space-y-1">
-                            <Label className="text-xs text-muted-foreground">Precio unitario <span className="text-destructive">*</span></Label>
-                            <Input type="number" min={0} step={100} value={item.unitPrice}
-                              onChange={e => updateCartItem(item.productId, 'unitPrice', Number(e.target.value))}
-                              className="h-8 text-sm shadow-sm" />
-                          </div>
-                        </div>
-                        <div className="flex justify-between items-center text-xs text-muted-foreground">
-                          <span>Subtotal</span>
-                          <span className="font-semibold text-foreground">{formatCOP(item.lineTotal)}</span>
-                        </div>
-                      </div>
-                    ))}
-                  </div>
-                  <div className="flex justify-between items-center rounded-lg bg-primary/5 border px-3 py-2.5">
-                    <span className="text-sm font-semibold">Total de la orden</span>
-                    <span className="text-base font-bold text-primary">{formatCOP(cartTotal)}</span>
-                  </div>
-                </div>
-              </>
-            )}
+          {/* LADO DERECHO: CARRITO DE COMPRA */}
+          <Col span={10} className="h-full">
+            <div className="h-full flex flex-col bg-white rounded-[2rem] shadow-xl border border-slate-100 overflow-hidden">
+              <div className="p-6 border-b border-slate-50 flex items-center justify-between bg-white shrink-0">
+                <Typography.Text strong className="text-[10px] text-slate-400 uppercase tracking-widest flex items-center gap-2">
+                  <ShoppingCart className="h-3 w-3 text-primary" /> Carrito de Compra
+                </Typography.Text>
+                <AntButton 
+                  danger 
+                  type="text" 
+                  size="small" 
+                  icon={<X className="h-3 w-3" />} 
+                  onClick={() => setCart([])}
+                  className="text-[9px] font-black uppercase"
+                >
+                  Vaciar
+                </AntButton>
+              </div>
 
-            {/* Botones */}
-            <div className="flex gap-2 pt-1">
-              <Button onClick={handleCreate} disabled={creating || cart.length === 0 || !providerId} className="flex-1 h-9 text-sm">
-                {creating
-                  ? <><RefreshCw className="h-3.5 w-3.5 mr-1.5 animate-spin" />Creando...</>
-                  : <><Plus className="h-3.5 w-3.5 mr-1.5" />Crear Orden</>}
-              </Button>
-              <Button variant="outline" onClick={() => { setView('list'); setProviderId(''); setNotes(''); setCart([]); setProviderProducts([]); }}
-                className="flex-1 h-9 text-sm">
-                Cancelar
-              </Button>
+              <div className="flex-1 overflow-y-auto p-4 scrollbar-thin">
+                <div className="mb-6 bg-slate-50 rounded-2xl p-4 border border-slate-100">
+                  <Typography.Text strong className="text-[10px] text-slate-400 uppercase tracking-widest mb-3 block">
+                    Notas de la Compra
+                  </Typography.Text>
+                  <Textarea 
+                    value={notes} 
+                    onChange={e => setNotes(e.target.value)} 
+                    placeholder="Observaciones de la entrada de mercancía..." 
+                    rows={2}
+                    className="rounded-xl bg-white border-slate-200 text-xs shadow-sm focus:ring-primary"
+                  />
+                </div>
+
+                <AntTable 
+                  dataSource={cart}
+                  rowKey="productId"
+                  pagination={false}
+                  size="small"
+                  className="cart-table"
+                  columns={[
+                    {
+                      title: <span className="text-[9px] font-black uppercase text-slate-400">Item</span>,
+                      dataIndex: 'productName',
+                      render: (name, record) => (
+                        <div className="flex flex-col">
+                          <span className="font-black text-slate-700 text-[11px] leading-tight">{name}</span>
+                          <span className="text-[9px] text-slate-400 font-bold">{record.sku || 'S/S'}</span>
+                        </div>
+                      )
+                    },
+                    {
+                      title: <span className="text-[9px] font-black uppercase text-slate-400 text-center">Cant</span>,
+                      dataIndex: 'quantity',
+                      align: 'center',
+                      width: 80,
+                      render: (q, record) => (
+                        <InputNumber 
+                          min={record.minStock || 1} 
+                          value={q} 
+                          size="small"
+                          onChange={val => updateCartItem(record.productId, 'quantity', Number(val))}
+                          className="w-14 text-xs font-bold rounded-lg border-slate-200" 
+                        />
+                      )
+                    },
+                    {
+                      title: <span className="text-[9px] font-black uppercase text-slate-400 text-right">Costo Unit.</span>,
+                      dataIndex: 'unitPrice',
+                      align: 'right',
+                      width: 100,
+                      render: (u, record) => (
+                        <InputNumber 
+                          min={0} 
+                          step={100}
+                          value={u} 
+                          size="small"
+                          onChange={val => updateCartItem(record.productId, 'unitPrice', Number(val))}
+                          className="w-24 text-xs font-bold rounded-lg border-slate-200" 
+                        />
+                      )
+                    },
+                    {
+                      title: <span className="text-[9px] font-black uppercase text-slate-400 text-right">Subtotal</span>,
+                      dataIndex: 'lineTotal',
+                      align: 'right',
+                      render: (t) => <span className="font-black text-slate-800 text-[11px]">{formatCOP(t)}</span>
+                    },
+                    {
+                      title: '',
+                      width: 40,
+                      render: (_, record) => (
+                        <AntButton type="text" danger icon={<X className="h-3 w-3" />} onClick={() => removeFromCart(record.productId)} />
+                      )
+                    }
+                  ]}
+                />
+              </div>
+
+              <div className="p-6 bg-slate-50 border-t border-slate-100 shrink-0 space-y-4">
+                <div 
+                  className="flex items-center justify-between p-4 rounded-2xl shadow-lg border"
+                  style={{ backgroundColor: '#1e293b', borderColor: '#334155' }}
+                >
+                  <div className="flex flex-col">
+                    <span className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Total Inversión</span>
+                    <span className="text-2xl font-black text-white tracking-tighter">
+                      {formatCOP(cartTotal)}
+                    </span>
+                  </div>
+                  <DollarSign className="h-8 w-8 text-slate-600 opacity-50" />
+                </div>
+
+                <AntButton 
+                  type="primary"
+                  block
+                  className="h-14 text-xs font-black uppercase rounded-2xl bg-primary border-none shadow-lg shadow-primary/20 flex items-center justify-center gap-2"
+                  disabled={creating || cart.length === 0 || !providerId}
+                  onClick={handleCreate}
+                  loading={creating}
+                >
+                  {!creating && <Plus className="h-4 w-4" />}
+                  {creating ? 'Procesando...' : 'REGISTRAR COMPRA'}
+                </AntButton>
+              </div>
             </div>
-          </div>
-        </div>
+          </Col>
+        </Row>
       </div>
     );
   }
@@ -824,7 +970,7 @@ export function PurchaseManagement() {
                             </div>
                           </TableCell>
                           <TableCell className="text-center">{item.quantity}</TableCell>
-                          <TableCell className="text-right text-sm">{formatCOP(Number(item.unitPrice))}</TableCell>
+                          <TableCell className="text-right text-sm">{formatCOP(Number((item as any).unitPrice || item.unitCost))}</TableCell>
                           <TableCell className="text-right pr-4 text-sm font-medium">{formatCOP(Number(item.lineTotal))}</TableCell>
                           {selectedPurchase.status === 'REGISTERED' && (
                             <TableCell>
@@ -922,7 +1068,7 @@ export function PurchaseManagement() {
           <h1 className="text-xl font-semibold flex items-center gap-2">
             <ShoppingCart className="h-5 w-5 text-primary" /> Gestión de Compras
           </h1>
-          <p className="text-sm text-muted-foreground mt-0.5">Órdenes de compra a proveedores</p>
+          
         </div>
         <div className="flex items-center gap-2">
           <Button variant="outline" size="sm" onClick={load} disabled={loading}>
@@ -934,145 +1080,100 @@ export function PurchaseManagement() {
         </div>
       </div>
 
-      {/* Filtros */}
-      <div className="flex gap-3">
-        <div className="relative flex-1">
-          <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground pointer-events-none z-10" />
-          <Input placeholder="Buscar por proveedor o número de orden..."
-            value={searchTerm} onChange={e => { setSearchTerm(e.target.value); setCurrentPage(1); }}
-            style={{ paddingLeft: '2.25rem' }} />
-        </div>
-        <Select value={statusFilter} onValueChange={v => { setStatusFilter(v); setCurrentPage(1); }}>
-          <SelectTrigger className="w-44">
-            <SelectValue placeholder="Estado" />
-          </SelectTrigger>
-          <SelectContent>
-            <SelectItem value="all">Todos los estados</SelectItem>
-            <SelectItem value="REGISTERED">Registrada</SelectItem>
-            <SelectItem value="COMPLETED">Completada</SelectItem>
-            <SelectItem value="CANCELLED">Cancelada</SelectItem>
-            <SelectItem value="ANNULED">Anulada</SelectItem>
-          </SelectContent>
-        </Select>
-      </div>
-
-      {/* Tabla */}
-      <Card>
-        <CardContent className="p-0">
-          <div className="flex items-center justify-between px-4 py-3 border-b">
-            <span className="text-sm font-medium">Órdenes de Compra</span>
-            <span className="text-xs text-muted-foreground">{filtered.length} orden{filtered.length !== 1 ? 'es' : ''}</span>
-          </div>
-
-          {loading ? (
-            <div className="flex items-center justify-center py-14 gap-2 text-muted-foreground">
-              <RefreshCw className="h-5 w-5 animate-spin" /><span className="text-sm">Cargando...</span>
-            </div>
-          ) : (
-            <Table>
-              <TableHeader>
-                <TableRow className="hover:bg-transparent">
-                  <TableHead className="pl-4"># Orden</TableHead>
-                  <TableHead>Proveedor</TableHead>
-                  <TableHead>Estado</TableHead>
-                  <TableHead className="text-right">Total</TableHead>
-                  <TableHead className="text-right pr-4">Acciones</TableHead>
-                </TableRow>
-              </TableHeader>
-              <TableBody>
-                {paginated.length === 0 ? (
-                  <TableRow>
-                    <TableCell colSpan={5} className="text-center py-10 text-muted-foreground text-sm">
-                      No se encontraron órdenes de compra
-                    </TableCell>
-                  </TableRow>
-                ) : paginated.map(p => {
-                  const st = STATUS_MAP[p.status] || STATUS_MAP.REGISTERED;
-                  return (
-                    <TableRow key={p.id}>
-                      <TableCell className="pl-4 font-mono text-sm font-medium">#{p.id}</TableCell>
-                      <TableCell>
-                        <div className="flex items-center gap-1.5">
-                          <Building2 className="h-3.5 w-3.5 text-muted-foreground shrink-0" />
-                          <span className="text-sm">{p.provider.name}</span>
-                        </div>
-                      </TableCell>
-                      <TableCell>
-                        <Badge className={`${st.color} flex items-center gap-1 w-fit text-xs`}>
-                          <PurchaseStatusIcon name={st.iconName} /> {st.label}
-                        </Badge>
-                      </TableCell>
-                      <TableCell className="text-right font-medium text-sm">
-                        {formatCOP(Number(p.totalPrice))}
-                      </TableCell>
-                    <TableCell className="text-right pr-4">
-                        <div className="flex items-center justify-end gap-1">
-                          {/* Ver detalle */}
-                          <Button variant="ghost" size="icon" className="h-8 w-8" onClick={() => openDetail(p)}>
-                            <Eye className="h-4 w-4 text-muted-foreground" />
-                          </Button>
-                          {/* PDF directo desde la lista */}
-                          <Button variant="ghost" size="icon" className="h-8 w-8"
-                            title="Descargar PDF"
-                            onClick={() => openPdfModal(p)}>
-                            <Download className="h-4 w-4 text-muted-foreground" />
-                          </Button>
-                          {/* Completar — solo REGISTERED */}
-                          {p.status === 'REGISTERED' && (
-                            <Button variant="ghost" size="icon" className="h-8 w-8"
-                              title="Completar orden"
-                              onClick={() => handleChangeStatus(p.id, 'COMPLETED')}>
-                              <CheckCircle className="h-4 w-4 text-green-600" />
-                            </Button>
-                          )}
-                          {/* Cancelar — solo REGISTERED */}
-                          {p.status === 'REGISTERED' && (
-                            <AlertDialog>
-                              <AlertDialogTrigger asChild>
-                                <Button variant="ghost" size="icon" className="h-8 w-8" title="Cancelar orden">
-                                  <XCircle className="h-4 w-4 text-destructive" />
-                                </Button>
-                              </AlertDialogTrigger>
-                              <AlertDialogContent>
-                                <AlertDialogHeader>
-                                  <AlertDialogTitle>¿Cancelar orden #{p.id}?</AlertDialogTitle>
-                                  <AlertDialogDescription>Esta acción no se puede deshacer.</AlertDialogDescription>
-                                </AlertDialogHeader>
-                                <AlertDialogFooter>
-                                  <AlertDialogCancel>No</AlertDialogCancel>
-                                  <AlertDialogAction onClick={() => handleChangeStatus(p.id, 'CANCELLED')}
-                                    className="bg-destructive text-destructive-foreground hover:bg-destructive/90">
-                                    Sí, cancelar
-                                  </AlertDialogAction>
-                                </AlertDialogFooter>
-                              </AlertDialogContent>
-                            </AlertDialog>
-                          )}
-                          {/* Anular — eliminado, una orden completada no se puede anular */}
-                        </div>
-                      </TableCell>
-                    </TableRow>
-                  );
-                })}
-              </TableBody>
-            </Table>
-          )}
-
-          {totalPages > 1 && (
-            <div className="flex items-center justify-between px-4 py-3 border-t">
-              <p className="text-xs text-muted-foreground">Página {currentPage} de {totalPages}</p>
-              <div className="flex gap-1">
-                <Button variant="outline" size="sm" onClick={() => setCurrentPage(p => Math.max(1, p - 1))} disabled={currentPage === 1}>
-                  <ChevronLeft className="h-4 w-4" />
-                </Button>
-                <Button variant="outline" size="sm" onClick={() => setCurrentPage(p => Math.min(totalPages, p + 1))} disabled={currentPage === totalPages}>
-                  <ChevronRight className="h-4 w-4" />
-                </Button>
+      <DataTable
+        title="Órdenes de Compra"
+        description={`Mostrando ${filtered.length} orden${filtered.length !== 1 ? 'es' : ''}`}
+        data={dataForTable}
+        columns={[
+          {
+            header: '# Orden',
+            accessor: (p: any) => <span className="font-mono text-sm font-medium">#{p.id}</span>
+          },
+          {
+            header: 'Proveedor',
+            accessor: (p: any) => (
+              <div className="flex items-center gap-1.5">
+                <Building2 className="h-3.5 w-3.5 text-muted-foreground shrink-0" />
+                <span className="text-sm">{p.provider.name}</span>
               </div>
-            </div>
-          )}
-        </CardContent>
-      </Card>
+            )
+          },
+          {
+            header: 'Estado',
+            accessor: (p: any) => {
+              const st = STATUS_MAP[p.status] || STATUS_MAP.REGISTERED;
+              return (
+                <Badge className={`${st.color} flex items-center gap-1 w-fit text-xs`}>
+                  <PurchaseStatusIcon name={st.iconName} /> {st.label}
+                </Badge>
+              );
+            }
+          },
+          {
+            header: 'Total',
+            accessor: (p: any) => (
+              <span className="font-medium text-sm">{formatCOP(Number(p.totalPrice))}</span>
+            )
+          }
+        ]}
+        searchableKeys={['providerName', 'orderNumber']}
+        searchPlaceholder="Buscar por proveedor o número de orden..."
+        itemsPerPage={ITEMS_PER_PAGE}
+        isLoading={loading}
+        customActions={(p: any) => (
+          <>
+            <Button variant="ghost" size="icon" className="h-8 w-8" onClick={() => openDetail(p)} title="Ver detalle">
+              <Eye className="h-4 w-4 text-muted-foreground" />
+            </Button>
+            <Button variant="ghost" size="icon" className="h-8 w-8" onClick={() => openPdfModal(p)} title="Descargar PDF">
+              <Download className="h-4 w-4 text-muted-foreground" />
+            </Button>
+            {p.status === 'REGISTERED' && (
+              <Button variant="ghost" size="icon" className="h-8 w-8"
+                title="Completar orden"
+                onClick={() => handleChangeStatus(p.id, 'COMPLETED')}>
+                <CheckCircle className="h-4 w-4 text-green-600" />
+              </Button>
+            )}
+            {p.status === 'REGISTERED' && (
+              <AlertDialog>
+                <AlertDialogTrigger asChild>
+                  <Button variant="ghost" size="icon" className="h-8 w-8" title="Cancelar orden">
+                    <XCircle className="h-4 w-4 text-destructive" />
+                  </Button>
+                </AlertDialogTrigger>
+                <AlertDialogContent>
+                  <AlertDialogHeader>
+                    <AlertDialogTitle>¿Cancelar orden #{p.id}?</AlertDialogTitle>
+                    <AlertDialogDescription>Esta acción no se puede deshacer.</AlertDialogDescription>
+                  </AlertDialogHeader>
+                  <AlertDialogFooter>
+                    <AlertDialogCancel>No</AlertDialogCancel>
+                    <AlertDialogAction onClick={() => handleChangeStatus(p.id, 'CANCELLED')}
+                      className="bg-destructive text-destructive-foreground hover:bg-destructive/90">
+                      Sí, cancelar
+                    </AlertDialogAction>
+                  </AlertDialogFooter>
+                </AlertDialogContent>
+              </AlertDialog>
+            )}
+          </>
+        )}
+        extraFilters={
+          <Select value={statusFilter} onValueChange={setStatusFilter}>
+            <SelectTrigger className="w-44 h-9">
+              <SelectValue placeholder="Estado" />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="all">Todos los estados</SelectItem>
+              <SelectItem value="REGISTERED">Registrada</SelectItem>
+              <SelectItem value="COMPLETED">Completada</SelectItem>
+              <SelectItem value="CANCELLED">Cancelada</SelectItem>
+              <SelectItem value="ANNULED">Anulada</SelectItem>
+            </SelectContent>
+          </Select>
+        }
+      />
       {/* Modal PDF */}
       <Dialog open={pdfModalOpen} onOpenChange={setPdfModalOpen}>
         <DialogContent className="max-w-3xl w-full flex flex-col p-0 gap-0" style={{ maxHeight: '90vh' }}>

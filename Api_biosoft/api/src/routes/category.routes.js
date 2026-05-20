@@ -1,14 +1,14 @@
-const router = require('express').Router();
-const { getAll, getOne, create, update, toggleStatus, remove } = require('../controllers/category.controller');
-const { verifyToken, verifyRole, verifyRoleOrPermission } = require('../middlewares/auth.middleware');
+// src/routes/category.routes.js
+const express = require('express');
+const router = express.Router();
+const categoryController = require('../controllers/category.controller');
+const { authenticateToken, optionalAuth } = require('../middleware/auth');
 
-const canManage = verifyRoleOrPermission({ roles: ['administrador'], permissions: ['categories.manage'] });
-
-router.get('/', getAll);
-router.get('/:id', getOne);
-router.post('/',            verifyToken, canManage, create);
-router.put('/:id',          verifyToken, canManage, update);
-router.patch('/:id/status', verifyToken, canManage, toggleStatus);
-router.delete('/:id',       verifyToken, verifyRole('administrador'), remove);
+router.get('/', optionalAuth, categoryController.getAll);
+router.get('/:id', optionalAuth, categoryController.getOne);
+router.post('/', authenticateToken, categoryController.create);
+router.put('/:id', authenticateToken, categoryController.update);
+router.patch('/:id/status', authenticateToken, categoryController.toggleStatus);
+router.delete('/:id', authenticateToken, categoryController.remove);
 
 module.exports = router;

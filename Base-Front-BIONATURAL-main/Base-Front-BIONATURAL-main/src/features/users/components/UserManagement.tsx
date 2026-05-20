@@ -12,11 +12,13 @@ import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, D
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle, AlertDialogTrigger } from '../../../components/ui/alert-dialog';
 import { Avatar, AvatarFallback, AvatarImage } from '../../../components/ui/avatar';
 import { Separator } from '../../../components/ui/separator';
+import { DataTable, Column } from '../../../shared/components/DataTable';
 import { ScrollArea } from '../../../components/ui/scroll-area';
 import { Checkbox } from '../../../components/ui/checkbox';
 import { toast } from 'sonner';
 import { usePersistedState, STORAGE_KEYS } from '../../../shared/utils/storage';
 import { apiFetch, getUsers, getConsolidatedUsers, updateUser, deleteUser, getRoles, toggleUserStatus } from '../../../lib/api';
+import { useDocumentTypesUser } from '../../../shared/contexts/SystemConfigContext';
 import { 
   Plus, 
   Search, 
@@ -52,7 +54,7 @@ interface User {
   phone: string;
   address: string;
   city: string;
-  documentType: 'Cédula' | 'Pasaporte' | 'Tarjeta de identidad';
+  documentType: string;   // CC, CE, PA, TI, NIT, etc. — viene de la BD
   documentNumber: string;
   role: string;
   origin?: string;        // 'Usuario' | 'Empleado' | 'Cliente' | 'Proveedor'
@@ -63,12 +65,8 @@ interface User {
   permissions?: string[];
 }
 
-// Tipos de documento
-const DOCUMENT_TYPES = [
-  { value: 'Cédula', label: 'Cédula' },
-  { value: 'Pasaporte', label: 'Pasaporte' },
-  { value: 'Tarjeta de identidad', label: 'Tarjeta de identidad' }
-];
+// Tipos de documento — se cargan desde la BD vía SystemConfigContext
+// (ver useDocumentTypesUser en el componente)
 
 // Roles disponibles (fallback estático — se reemplaza con los de la API)
 const AVAILABLE_ROLES = [
@@ -76,110 +74,13 @@ const AVAILABLE_ROLES = [
   { value: 'user', label: 'Cliente', color: 'bg-gray-100 text-gray-800' },
 ];
 
-// Usuarios de ejemplo
-const SAMPLE_USERS: User[] = [
-  {
-    id: '1',
-    firstName: 'Ana',
-    lastName: 'García',
-    email: 'ana.garcia@naturista.com',
-    phone: '+57 300 123 4567',
-    address: 'Calle Principal 123',
-    city: 'Bogotá',
-    documentType: 'Cédula',
-    documentNumber: '1234567890',
-    role: 'Administrador',
-    isActive: true,
-    lastLogin: '2024-01-20 10:30',
-    createdAt: '2024-01-15',
-    permissions: ['all']
-  },
-  {
-    id: '2',
-    firstName: 'Carlos',
-    lastName: 'Mendoza',
-    email: 'carlos.mendoza@naturista.com',
-    phone: '+57 310 234 5678',
-    address: 'Avenida Verde 456',
-    city: 'Medellín',
-    documentType: 'Cédula',
-    documentNumber: '2345678901',
-    role: 'Vendedor',
-    isActive: true,
-    lastLogin: '2024-01-20 09:15',
-    createdAt: '2024-01-16',
-    permissions: ['sales', 'clients']
-  },
-  {
-    id: '3',
-    firstName: 'María',
-    lastName: 'López',
-    email: 'maria.lopez@naturista.com',
-    phone: '+57 320 345 6789',
-    address: 'Boulevard Eco 789',
-    city: 'Cali',
-    documentType: 'Cédula',
-    documentNumber: '3456789012',
-    role: 'Bodega',
-    isActive: true,
-    lastLogin: '2024-01-19 16:45',
-    createdAt: '2024-01-17',
-    permissions: ['inventory', 'products']
-  },
-  {
-    id: '4',
-    firstName: 'Roberto',
-    lastName: 'Silva',
-    email: 'roberto.silva@naturista.com',
-    phone: '+57 330 456 7890',
-    address: 'Calle Contador 321',
-    city: 'Barranquilla',
-    documentType: 'Cédula',
-    documentNumber: '4567890123',
-    role: 'Contador',
-    isActive: true,
-    lastLogin: '2024-01-19 11:20',
-    createdAt: '2024-01-18',
-    permissions: ['reports', 'financial']
-  },
-  {
-    id: '5',
-    firstName: 'Laura',
-    lastName: 'Jiménez',
-    email: 'laura.jimenez@gmail.com',
-    phone: '+57 340 567 8901',
-    address: 'Residencial Verde 654',
-    city: 'Cartagena',
-    documentType: 'Pasaporte',
-    documentNumber: 'AB123456',
-    role: 'Cliente',
-    isActive: true,
-    lastLogin: '2024-01-20 14:30',
-    createdAt: '2024-01-19',
-    permissions: ['profile']
-  },
-  {
-    id: '6',
-    firstName: 'José',
-    lastName: 'Ramírez',
-    email: 'jose.ramirez@email.com',
-    phone: '+57 350 678 9012',
-    address: 'Colonia Naturaleza 987',
-    city: 'Bucaramanga',
-    documentType: 'Cédula',
-    documentNumber: '6789012345',
-    role: 'Cliente',
-    isActive: false,
-    lastLogin: '2024-01-15 08:45',
-    createdAt: '2024-01-10',
-    permissions: ['profile']
-  }
-];
+
 
 const ITEMS_PER_PAGE = 5;
 
 export function UserManagement() {
-  const [users, setUsers] = usePersistedState<User[]>(STORAGE_KEYS.USERS, SAMPLE_USERS);
+  const DOCUMENT_TYPES = useDocumentTypesUser();
+  const [users, setUsers] = usePersistedState<User[]>(STORAGE_KEYS.USERS, []);
   const [apiUsers, setApiUsers] = useState<User[]>([]);
   const [apiRoles, setApiRoles] = useState<{ id: number; name: string }[]>([]);
   const [loading, setLoading] = useState(true);
@@ -189,6 +90,7 @@ export function UserManagement() {
   const [originFilter, setOriginFilter] = useState('all');
   const [currentPage, setCurrentPage] = useState(1);
   const [selectedUser, setSelectedUser] = useState<User | null>(null);
+  const [userToDelete, setUserToDelete] = useState<User | null>(null);
   const [isCreateModalOpen, setIsCreateModalOpen] = useState(false);
   const [isEditModalOpen, setIsEditModalOpen] = useState(false);
   const [isRoleModalOpen, setIsRoleModalOpen] = useState(false);
@@ -231,7 +133,7 @@ export function UserManagement() {
     load();
   }, []);
 
-  const displayUsers = apiUsers;
+  const displayUsers = apiUsers.filter(u => u.origin !== 'Proveedor');
 
   // Estados del formulario
   const [formData, setFormData] = useState({
@@ -247,28 +149,25 @@ export function UserManagement() {
     isActive: true,
     password: '',
     confirmPassword: '',
+    // Campos extra según rol
+    birthDate: '',
+    hireDate: '',
+    salary: '',
+    position: '',
   });
   const [showPassword, setShowPassword] = useState(false);
   const [showConfirmPassword, setShowConfirmPassword] = useState(false);
 
   // Filtrar usuarios
   const filteredUsers = displayUsers.filter(user => {
-    const fullName = `${user.firstName} ${user.lastName}`;
-    const matchesSearch = fullName.toLowerCase().includes(searchTerm.toLowerCase()) ||
-                         user.email.toLowerCase().includes(searchTerm.toLowerCase());
     const matchesRole = roleFilter === 'all' || user.role === roleFilter;
     const matchesOrigin = originFilter === 'all' || user.origin === originFilter;
     const matchesStatus = statusFilter === 'all' || 
                          (statusFilter === 'active' && user.isActive) ||
                          (statusFilter === 'inactive' && !user.isActive);
     
-    return matchesSearch && matchesRole && matchesOrigin && matchesStatus;
+    return matchesRole && matchesOrigin && matchesStatus;
   });
-
-  // Paginación
-  const totalPages = Math.ceil(filteredUsers.length / ITEMS_PER_PAGE);
-  const startIndex = (currentPage - 1) * ITEMS_PER_PAGE;
-  const paginatedUsers = filteredUsers.slice(startIndex, startIndex + ITEMS_PER_PAGE);
 
   // Limpiar formulario
   const clearForm = () => {
@@ -285,6 +184,10 @@ export function UserManagement() {
       isActive: true,
       password: '',
       confirmPassword: '',
+      birthDate: '',
+      hireDate: '',
+      salary: '',
+      position: '',
     });
     setShowPassword(false);
     setShowConfirmPassword(false);
@@ -304,24 +207,65 @@ export function UserManagement() {
 
     const roleObj = apiRoles.find(r => r.name.toLowerCase() === formData.role.toLowerCase());
     const roleId = roleObj?.id || 4;
+    const fullName = `${formData.firstName} ${formData.lastName}`;
+    const rol = formData.role.toLowerCase();
+    const isEmpleado = ['vendedor', 'bodega', 'contador', 'administrador'].includes(rol);
+    const isCliente  = rol === 'cliente' || rol === 'user';
 
     try {
-      const res = await (await import('../../../lib/api')).authRegister(
-        `${formData.firstName} ${formData.lastName}`,
-        formData.email,
-        formData.documentNumber,
-        roleId,
-        formData.phone || undefined,
-        formData.documentType || undefined,
+      const api = await import('../../../lib/api');
+
+      // 1. Crear el usuario en la tabla users
+      const res = await api.authRegister(
+        fullName, formData.email, formData.documentNumber, roleId,
+        formData.phone || undefined, formData.documentType || undefined,
         formData.documentNumber || undefined,
       );
+
       if (res.success !== false) {
+        // 2. Si es empleado, crear también en tabla Employee
+        if (isEmpleado) {
+          try {
+            await api.apiFetch('/employees', {
+              method: 'POST',
+              body: JSON.stringify({
+                fullName,
+                email: formData.email,
+                phone: formData.phone || undefined,
+                documentType: formData.documentType || undefined,
+                documentNumber: formData.documentNumber || undefined,
+                address: formData.address || undefined,
+                birthDate: formData.birthDate || undefined,
+                hireDate: formData.hireDate || undefined,
+                salary: formData.salary ? parseFloat(formData.salary) : undefined,
+                position: formData.position || formData.role,
+                isActive: true,
+              }),
+            });
+          } catch { /* no bloquear si falla el empleado */ }
+        }
+
+        // 3. Si es cliente, crear también en tabla Client
+        if (isCliente) {
+          try {
+            await api.apiFetch('/clients', {
+              method: 'POST',
+              body: JSON.stringify({
+                name: fullName,
+                email: formData.email,
+                phone: formData.phone || undefined,
+                documentType: formData.documentType || undefined,
+                documentNumber: formData.documentNumber || undefined,
+                address: formData.address || undefined,
+              }),
+            });
+          } catch { /* no bloquear si falla el cliente */ }
+        }
+
         setIsCreateModalOpen(false);
         setCurrentView('list');
         clearForm();
-        // Recargar desde la API para ver el nuevo usuario en el listado
-        const { getConsolidatedUsers } = await import('../../../lib/api');
-        const fresh = await getConsolidatedUsers();
+        const fresh = await api.getConsolidatedUsers();
         if (fresh.success) {
           setApiUsers(fresh.data.map((u: any) => ({
             id: String(u.id),
@@ -341,7 +285,7 @@ export function UserManagement() {
             permissions: [],
           })));
         }
-        toast.success(`Usuario "${formData.firstName} ${formData.lastName}" creado exitosamente`);
+        toast.success(`Usuario "${fullName}" creado exitosamente`);
       }
     } catch (err: any) {
       toast.error(err?.message || 'Error al crear usuario');
@@ -360,6 +304,10 @@ export function UserManagement() {
       name: `${formData.firstName} ${formData.lastName}`,
       email: formData.email,
       isActive: formData.isActive,
+      // Documento y teléfono — se sincronizan en employees/clients automáticamente
+      documentType:   formData.documentType   || undefined,
+      documentNumber: formData.documentNumber || undefined,
+      phone:          formData.phone          || undefined,
     };
     if (roleObj) updatedData.roleId = roleObj.id;
 
@@ -453,6 +401,10 @@ export function UserManagement() {
       isActive: user.isActive,
       password: '',
       confirmPassword: '',
+      birthDate: '',
+      hireDate: '',
+      salary: '',
+      position: '',
     });
     setShowPassword(false);
     setShowConfirmPassword(false);
@@ -478,7 +430,13 @@ export function UserManagement() {
       documentType: user.documentType,
       documentNumber: user.documentNumber,
       role: user.role,
-      isActive: user.isActive
+      isActive: user.isActive,
+      password: '',
+      confirmPassword: '',
+      birthDate: '',
+      hireDate: '',
+      salary: '',
+      position: '',
     });
     setIsRoleModalOpen(true);
   };
@@ -529,14 +487,35 @@ export function UserManagement() {
   const validateForm = () => {
     const errs: Record<string, string> = {};
     const isCreate = currentView === 'create';
+    const rol = (formData.role || '').toLowerCase();
+    const isEmpleado = ['vendedor', 'bodega', 'contador', 'administrador'].includes(rol);
+
     if (!formData.firstName.trim()) errs.firstName = 'Obligatorio';
     if (!formData.lastName.trim()) errs.lastName = 'Obligatorio';
     if (!formData.email.trim()) errs.email = 'Obligatorio';
     else if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(formData.email)) errs.email = 'Email inválido';
     if (!formData.documentType) errs.documentType = 'Obligatorio';
     if (!formData.documentNumber.trim()) errs.documentNumber = 'Obligatorio';
+    else if (!/^\d{8,15}$/.test(formData.documentNumber.trim())) errs.documentNumber = '8-15 dígitos numéricos';
     if (!formData.phone.trim()) errs.phone = 'Obligatorio';
+    else if (!/^\+?\d{10,20}$/.test(formData.phone.trim())) errs.phone = '10-20 dígitos (puede incluir +)';
     if (!formData.role) errs.role = 'Obligatorio';
+
+    // Validaciones específicas para empleados
+    if (isEmpleado) {
+      if (!formData.birthDate) {
+        errs.birthDate = 'Obligatorio';
+      } else {
+        const birth = new Date(formData.birthDate);
+        const today = new Date();
+        const age = today.getFullYear() - birth.getFullYear() -
+          (today < new Date(today.getFullYear(), birth.getMonth(), birth.getDate()) ? 1 : 0);
+        if (age < 18) errs.birthDate = 'Debe ser mayor de 18 años';
+      }
+      if (!formData.hireDate) errs.hireDate = 'Obligatorio';
+      if (!formData.salary || Number(formData.salary) <= 0) errs.salary = 'Obligatorio y mayor a 0';
+    }
+
     // En editar, contraseña es opcional; si se ingresa debe cumplir requisitos
     if (!isCreate && formData.password) {
       if (formData.password.length < 8) errs.password = 'Mínimo 8 caracteres';
@@ -582,7 +561,7 @@ export function UserManagement() {
               <Users className="h-4 w-4 text-primary" />
             </div>
             <div>
-              <p className="font-semibold text-sm">{isCreate ? 'Registrar Usuario' : 'Editar Usuario'}</p>
+              <p className="font-semibold text-sm">{isCreate ? 'Nuevo Usuario' : 'Editar Usuario'}</p>
               <p className="text-xs text-muted-foreground">
                 {isCreate ? 'Los campos con * son obligatorios' : `Modificando: ${selectedUser?.firstName} ${selectedUser?.lastName}`}
               </p>
@@ -675,6 +654,69 @@ export function UserManagement() {
               {formErrors.role && <p className="text-xs text-destructive flex items-center gap-1"><Info className="h-3 w-3" />{formErrors.role}</p>}
             </div>
 
+            {/* ── Campos extra según rol ─────────────────────────────── */}
+            {/* Dirección — para todos */}
+            <div className="space-y-1">
+              <Label htmlFor="address" className="text-xs font-medium">Dirección</Label>
+              <Input id="address" value={formData.address}
+                onChange={e => setFormData(p => ({ ...p, address: e.target.value }))}
+                placeholder="Calle 123 #45-67"
+                className="h-9 text-sm shadow-sm" />
+            </div>
+
+            {/* Campos solo para roles de empleado */}
+            {(() => {
+              const rol = formData.role.toLowerCase();
+              const isEmpleado = ['vendedor', 'bodega', 'contador', 'administrador'].includes(rol);
+              const isCliente  = rol === 'cliente' || rol === 'user';
+              if (!isEmpleado && !isCliente) return null;
+              return (
+                <>
+                  {isEmpleado && (
+                    <>
+                      {/* Cargo */}
+                      <div className="space-y-1">
+                        <Label htmlFor="position" className="text-xs font-medium">Cargo <span className="text-destructive">*</span></Label>
+                        <Input id="position" value={formData.position}
+                          onChange={e => setFormData(p => ({ ...p, position: e.target.value }))}
+                          placeholder="Ej: Vendedor, Bodeguero..."
+                          className="h-9 text-sm shadow-sm" />
+                      </div>
+                      {/* Fecha nacimiento + Fecha contratación */}
+                      <div className="grid grid-cols-2 gap-2">
+                        <div className="space-y-1">
+                          <Label htmlFor="birthDate" className="text-xs font-medium">Fecha nacimiento <span className="text-destructive">*</span></Label>
+                          <Input id="birthDate" type="date" value={formData.birthDate}
+                            onChange={e => { setFormData(p => ({ ...p, birthDate: e.target.value })); setFormErrors(p => ({ ...p, birthDate: '' })); }}
+                            max={new Date(new Date().setFullYear(new Date().getFullYear() - 18)).toISOString().split('T')[0]}
+                            className={`h-9 text-sm shadow-sm ${formErrors.birthDate ? 'border-destructive' : ''}`} />
+                          {formErrors.birthDate
+                            ? <p className="text-xs text-destructive flex items-center gap-1"><Info className="h-3 w-3" />{formErrors.birthDate}</p>
+                            : <p className="text-xs text-muted-foreground">Debe ser mayor de 18 años</p>}
+                        </div>
+                        <div className="space-y-1">
+                          <Label htmlFor="hireDate" className="text-xs font-medium">Fecha contratación <span className="text-destructive">*</span></Label>
+                          <Input id="hireDate" type="date" value={formData.hireDate}
+                            onChange={e => { setFormData(p => ({ ...p, hireDate: e.target.value })); setFormErrors(p => ({ ...p, hireDate: '' })); }}
+                            className={`h-9 text-sm shadow-sm ${formErrors.hireDate ? 'border-destructive' : ''}`} />
+                          {formErrors.hireDate && <p className="text-xs text-destructive flex items-center gap-1"><Info className="h-3 w-3" />{formErrors.hireDate}</p>}
+                        </div>
+                      </div>
+                      {/* Salario */}
+                      <div className="space-y-1">
+                        <Label htmlFor="salary" className="text-xs font-medium">Salario (COP) <span className="text-destructive">*</span></Label>
+                        <Input id="salary" type="number" min={0} value={formData.salary}
+                          onChange={e => { setFormData(p => ({ ...p, salary: e.target.value })); setFormErrors(p => ({ ...p, salary: '' })); }}
+                          placeholder="Ej: 2000000"
+                          className={`h-9 text-sm shadow-sm ${formErrors.salary ? 'border-destructive' : ''}`} />
+                        {formErrors.salary && <p className="text-xs text-destructive flex items-center gap-1"><Info className="h-3 w-3" />{formErrors.salary}</p>}
+                      </div>
+                    </>
+                  )}
+                </>
+              );
+            })()}
+
             {/* Contraseña */}
             {isCreate ? (
               <div className="rounded-md bg-muted px-4 py-3 text-sm text-muted-foreground">
@@ -732,7 +774,7 @@ export function UserManagement() {
             {/* Botones */}
             <div className="flex gap-2 pt-1">
               <Button onClick={handleSubmit} className="flex-1 h-9 text-sm">
-                {isCreate ? <><Plus className="h-3.5 w-3.5 mr-1.5" />Registrar</> : <><Edit className="h-3.5 w-3.5 mr-1.5" />Actualizar</>}
+                {isCreate ? <><Plus className="h-3.5 w-3.5 mr-1.5" />Guardar</> : <><Edit className="h-3.5 w-3.5 mr-1.5" />Actualizar</>}
               </Button>
               <Button variant="outline" onClick={cancel} className="flex-1 h-9 text-sm">Cancelar</Button>
             </div>
@@ -741,6 +783,65 @@ export function UserManagement() {
       </div>
     );
   }
+
+  const tableColumns: Column<User>[] = [
+    {
+      header: 'Usuario',
+      accessor: (user) => {
+        const isInactive = !user.isActive;
+        return (
+          <div className="flex items-center gap-3">
+            <Avatar className={`h-10 w-10 ${isInactive ? 'opacity-50' : ''}`}>
+              <AvatarImage src={user.avatar} alt={`${user.firstName} ${user.lastName}`} />
+              <AvatarFallback className={isInactive ? 'bg-muted text-muted-foreground' : 'bg-primary/10 text-primary font-medium'}>
+                {getUserInitials(user.firstName || '', user.lastName || '')}
+              </AvatarFallback>
+            </Avatar>
+            <div>
+              <p className={`font-medium ${isInactive ? 'text-muted-foreground' : ''}`}>{user.firstName} {user.lastName}</p>
+              <p className="text-xs text-muted-foreground">{user.email}</p>
+            </div>
+          </div>
+        );
+      }
+    },
+    {
+      header: 'Rol',
+      accessor: (user) => (
+        <Badge className={getRoleColor(user.role)}>
+          {user.role}
+        </Badge>
+      )
+    },
+    {
+      header: 'Origen',
+      accessor: (user) => (
+        <Badge className={getOriginColor(user.origin)}>
+          {user.origin}
+        </Badge>
+      )
+    },
+    {
+      header: 'Estado',
+      accessor: (user) => (
+        <div className="flex items-center gap-2">
+          <Switch
+            checked={user.isActive}
+            onCheckedChange={() => handleToggleUserStatus(user.id)}
+          />
+          <span className="text-sm text-muted-foreground">
+            {user.isActive ? 'Activo' : 'Inactivo'}
+          </span>
+        </div>
+      )
+    },
+    {
+      header: 'Último Acceso',
+      accessor: (user) => (
+        <span className="text-sm text-muted-foreground">{user.lastLogin}</span>
+      )
+    }
+  ];
 
   return (
     <div className="space-y-6">
@@ -751,222 +852,99 @@ export function UserManagement() {
             <Users className="h-6 w-6" />
             Gestión de Usuarios
           </h2>
-          <p className="text-muted-foreground">
-            Administra todos los usuarios del sistema ({filteredUsers.length} usuarios)
-          </p>
         </div>
         
         <Button onClick={() => { clearForm(); setCurrentView('create'); }}>
           <Plus className="h-4 w-4 mr-2" />
-          Registrar Usuario
+          Nuevo Usuario
         </Button>
       </div>
 
-      {/* Búsqueda y filtros */}
-      <Card>
-        <CardContent className="p-4">
-          <div className="flex flex-col md:flex-row gap-4">
-            <div className="relative flex-1">
-              <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 h-4 w-4 text-muted-foreground" />
-              <Input
-                placeholder="Buscar por nombre o email..."
-                value={searchTerm}
-                onChange={(e) => setSearchTerm(e.target.value)}
-                className="pl-10"
-              />
-            </div>
-            <div className="flex gap-2">
-              <Select value={originFilter} onValueChange={setOriginFilter}>
-                <SelectTrigger className="w-36">
-                  <SelectValue placeholder="Tipo" />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="all">Todos los tipos</SelectItem>
-                  <SelectItem value="Usuario">Usuario</SelectItem>
-                  <SelectItem value="Empleado">Empleado</SelectItem>
-                  <SelectItem value="Cliente">Cliente</SelectItem>
-                  <SelectItem value="Proveedor">Proveedor</SelectItem>
-                </SelectContent>
-              </Select>
-              <Select value={roleFilter} onValueChange={setRoleFilter}>
-                <SelectTrigger className="w-40">
-                  <SelectValue placeholder="Filtrar por rol" />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="all">Todos los roles</SelectItem>
-                  {(apiRoles.length > 0 ? apiRoles.map(r => ({ value: r.name, label: r.name })) : AVAILABLE_ROLES).map(role => (
-                    <SelectItem key={role.value} value={role.value}>
-                      {role.label}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-              
-              <Select value={statusFilter} onValueChange={setStatusFilter}>
-                <SelectTrigger className="w-40">
-                  <SelectValue placeholder="Estado" />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="all">Todos</SelectItem>
-                  <SelectItem value="active">Activos</SelectItem>
-                  <SelectItem value="inactive">Inactivos</SelectItem>
-                </SelectContent>
-              </Select>
-            </div>
+      <DataTable
+        title="Usuarios"
+        description={`Mostrando ${filteredUsers.length} usuarios en total`}
+        data={filteredUsers}
+        columns={tableColumns}
+        searchableKeys={['firstName', 'lastName', 'email']}
+        searchPlaceholder="Buscar por nombre o email..."
+        itemsPerPage={ITEMS_PER_PAGE}
+        isLoading={loading}
+        onEdit={(u) => { if(u.isActive) openEditModal(u); else toast.error('Usuario inactivo'); }}
+        onDelete={(u) => { if(u.isActive) setUserToDelete(u); else toast.error('Usuario inactivo'); }}
+        customActions={(user) => (
+          <>
+            <Button variant="ghost" size="icon" onClick={() => openDetailModal(user)} title="Ver detalles" className="h-8 w-8">
+              <Eye className="w-4 h-4" />
+            </Button>
+            <Button variant="ghost" size="icon" onClick={() => user.isActive && openRoleModal(user)} disabled={!user.isActive} title={user.isActive ? 'Asignar rol/permisos' : 'Usuario inactivo'} className="h-8 w-8">
+              <Shield className={`w-4 h-4 ${user.isActive ? 'text-indigo-600' : 'text-muted-foreground/30'}`} />
+            </Button>
+          </>
+        )}
+        extraFilters={
+          <div className="flex flex-wrap gap-2">
+            <Select value={originFilter} onValueChange={setOriginFilter}>
+              <SelectTrigger className="w-[140px] h-9">
+                <SelectValue placeholder="Tipo" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="all">Todos los tipos</SelectItem>
+                <SelectItem value="Usuario">Usuario</SelectItem>
+                <SelectItem value="Empleado">Empleado</SelectItem>
+                <SelectItem value="Cliente">Cliente</SelectItem>
+                <SelectItem value="Proveedor">Proveedor</SelectItem>
+              </SelectContent>
+            </Select>
+            <Select value={roleFilter} onValueChange={setRoleFilter}>
+              <SelectTrigger className="w-[160px] h-9">
+                <SelectValue placeholder="Rol" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="all">Todos los roles</SelectItem>
+                {(apiRoles.length > 0 ? apiRoles.map(r => ({ value: r.name, label: r.name })) : AVAILABLE_ROLES).map(role => (
+                  <SelectItem key={role.value} value={role.value}>
+                    {role.label}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+            <Select value={statusFilter} onValueChange={setStatusFilter}>
+              <SelectTrigger className="w-[140px] h-9">
+                <SelectValue placeholder="Estado" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="all">Todos los estados</SelectItem>
+                <SelectItem value="active">Activos</SelectItem>
+                <SelectItem value="inactive">Inactivos</SelectItem>
+              </SelectContent>
+            </Select>
           </div>
-        </CardContent>
-      </Card>
+        }
+      />
 
-      {/* Tabla de usuarios */}
-      <Card>
-        <CardHeader>
-          <CardTitle>Lista de Usuarios</CardTitle>
-          <CardDescription>
-            Mostrando {paginatedUsers.length} de {filteredUsers.length} usuarios
-          </CardDescription>
-        </CardHeader>
-        <CardContent>
-          <Table>
-            <TableHeader>
-              <TableRow>
-                <TableHead>Documento</TableHead>
-                <TableHead>Usuario</TableHead>
-                <TableHead>Tipo</TableHead>
-                <TableHead>Rol / Cargo</TableHead>
-                <TableHead>Estado</TableHead>
-                <TableHead className="text-right">Acciones</TableHead>
-              </TableRow>
-            </TableHeader>
-            <TableBody>
-              {paginatedUsers.map((user) => (
-                  <TableRow key={user.id} className={!user.isActive ? 'opacity-60' : ''}>
-                  <TableCell>
-                    {user.documentNumber
-                      ? <div className="text-sm"><span className="font-medium">{user.documentType}</span><p className="text-muted-foreground text-xs">{user.documentNumber}</p></div>
-                      : <span className="text-muted-foreground text-sm">—</span>}
-                  </TableCell>
-                  <TableCell>
-                    <div className="flex items-center gap-3">
-                      <Avatar className="h-8 w-8">
-                        <AvatarImage src={user.avatar} alt={`${user.firstName} ${user.lastName}`} />
-                        <AvatarFallback className={`text-xs ${user.isActive ? 'bg-primary/10 text-primary' : 'bg-muted text-muted-foreground'}`}>
-                          {getUserInitials(user.firstName, user.lastName)}
-                        </AvatarFallback>
-                      </Avatar>
-                      <div>
-                        <p className="font-medium text-sm">{user.firstName} {user.lastName}</p>
-                        <div className="text-xs text-muted-foreground flex items-center gap-1">
-                          <Mail className="h-3 w-3" />
-                          {user.email}
-                        </div>
-                        {user.phone && (
-                          <div className="text-xs text-muted-foreground flex items-center gap-1">
-                            <Phone className="h-3 w-3" />
-                            {user.phone}
-                          </div>
-                        )}
-                      </div>
-                    </div>
-                  </TableCell>
-                  <TableCell>
-                    <Badge className={getOriginColor(user.origin)}>
-                      {user.origin || 'Usuario'}
-                    </Badge>
-                  </TableCell>
-                  <TableCell>
-                    <Badge className={getRoleColor(user.role)}>
-                      {user.role}
-                    </Badge>
-                  </TableCell>
-                  <TableCell>
-                    <div className="flex items-center gap-2">
-                      <Switch
-                        checked={user.isActive}
-                        onCheckedChange={() => handleToggleUserStatus(user.id)}
-                        className="scale-90"
-                      />
-                      <span className="text-sm text-muted-foreground">
-                        {user.isActive ? 'Activo' : 'Inactivo'}
-                      </span>
-                    </div>
-                  </TableCell>
-                  <TableCell className="text-right">
-                    <div className="flex items-center justify-end gap-1">
-                      {/* Ver detalle — siempre disponible */}
-                      <Button variant="ghost" size="sm"
-                        onClick={() => openDetailModal(user)} title="Ver detalle">
-                        <Eye className="h-4 w-4 text-muted-foreground" />
-                      </Button>
-                      {/* Editar — bloqueado si inactivo */}
-                      <Button variant="ghost" size="sm"
-                        onClick={() => user.isActive && openEditModal(user)}
-                        disabled={!user.isActive}
-                        title={user.isActive ? 'Editar usuario' : 'Usuario inactivo'}>
-                        <Edit className={`h-4 w-4 ${user.isActive ? 'text-muted-foreground' : 'text-muted-foreground/30'}`} />
-                      </Button>
-                      {/* Eliminar — bloqueado si inactivo */}
-                      <AlertDialog>
-                        <AlertDialogTrigger asChild>
-                          <Button variant="ghost" size="sm"
-                            disabled={!user.isActive}
-                            title={user.isActive ? 'Eliminar usuario' : 'Usuario inactivo'}>
-                            <Trash2 className={`h-4 w-4 ${user.isActive ? 'text-destructive' : 'text-muted-foreground/30'}`} />
-                          </Button>
-                        </AlertDialogTrigger>
-                        <AlertDialogContent>
-                          <AlertDialogHeader>
-                            <AlertDialogTitle>¿Eliminar usuario?</AlertDialogTitle>
-                            <AlertDialogDescription>
-                              Esta acción no se puede deshacer. El usuario "{user.firstName} {user.lastName}" será eliminado permanentemente del sistema.
-                            </AlertDialogDescription>
-                          </AlertDialogHeader>
-                          <AlertDialogFooter>
-                            <AlertDialogCancel>Cancelar</AlertDialogCancel>
-                            <AlertDialogAction
-                              onClick={() => handleDeleteUser(user.id)}
-                              className="bg-destructive text-destructive-foreground hover:bg-destructive/90">
-                              Eliminar
-                            </AlertDialogAction>
-                          </AlertDialogFooter>
-                        </AlertDialogContent>
-                      </AlertDialog>
-                    </div>
-                  </TableCell>
-                </TableRow>
-              ))}
-            </TableBody>
-          </Table>
-
-          {/* Paginación */}
-          {totalPages > 1 && (
-            <div className="flex items-center justify-between mt-4">
-              <div className="text-sm text-muted-foreground">
-                Página {currentPage} de {totalPages}
-              </div>
-              <div className="flex gap-2">
-                <Button
-                  variant="outline"
-                  size="sm"
-                  onClick={() => setCurrentPage(prev => Math.max(1, prev - 1))}
-                  disabled={currentPage === 1}
-                >
-                  <ChevronLeft className="h-4 w-4" />
-                  Anterior
-                </Button>
-                <Button
-                  variant="outline"
-                  size="sm"
-                  onClick={() => setCurrentPage(prev => Math.min(totalPages, prev + 1))}
-                  disabled={currentPage === totalPages}
-                >
-                  Siguiente
-                  <ChevronRight className="h-4 w-4" />
-                </Button>
-              </div>
-            </div>
-          )}
-        </CardContent>
-      </Card>
+      <AlertDialog open={!!userToDelete} onOpenChange={(open) => !open && setUserToDelete(null)}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>¿Eliminar usuario?</AlertDialogTitle>
+            <AlertDialogDescription>
+              Esta acción no se puede deshacer. El usuario "{userToDelete?.firstName} {userToDelete?.lastName}" será eliminado permanentemente del sistema.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Cancelar</AlertDialogCancel>
+            <AlertDialogAction
+              onClick={() => {
+                if (userToDelete) {
+                  handleDeleteUser(userToDelete.id);
+                  setUserToDelete(null);
+                }
+              }}
+              className="bg-destructive text-destructive-foreground hover:bg-destructive/90">
+              Eliminar
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
 
       {/* Modal: Ver Detalle del Usuario */}
       <Dialog open={isDetailModalOpen} onOpenChange={setIsDetailModalOpen}>

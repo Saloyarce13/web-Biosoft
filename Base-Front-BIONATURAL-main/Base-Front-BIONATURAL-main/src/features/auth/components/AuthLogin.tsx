@@ -89,7 +89,12 @@ export function AuthLogin({ onLogin, onBack, onRegister }: AuthLoginProps) {
       localStorage.setItem('authToken', token);
       setLoginAttemptsLeft(null);
       setLoginBlockedUntil(null);
-      onLogin({ name: user.name, email: user.email, role: user.role, permissions: user.permissions || [] });
+      // user.role puede ser objeto {id, name, permissions} o string
+      const roleName = typeof user.role === 'object' ? (user.role as any)?.name ?? '' : user.role ?? '';
+      const rolePerms: string[] = typeof user.role === 'object'
+        ? ((user.role as any)?.permissions ?? []).map((p: any) => p?.permission?.name ?? p?.name ?? p)
+        : (user.permissions ?? []);
+      onLogin({ name: user.name, email: user.email, role: roleName, permissions: rolePerms });
       toast.success('Inicio de sesión exitoso');
     } catch (error: any) {
       const msg: string = error?.message || '';
@@ -161,7 +166,11 @@ export function AuthLogin({ onLogin, onBack, onRegister }: AuthLoginProps) {
           const loginRes = await authLogin(registerForm.email.trim(), registerForm.password);
           const { token, user } = loginRes.data;
           localStorage.setItem('authToken', token);
-          onLogin({ name: user.name, email: user.email, role: user.role, permissions: user.permissions || [] });
+          const roleName = typeof user.role === 'object' ? (user.role as any)?.name ?? '' : user.role ?? '';
+          const rolePerms: string[] = typeof user.role === 'object'
+            ? ((user.role as any)?.permissions ?? []).map((p: any) => p?.permission?.name ?? p?.name ?? p)
+            : (user.permissions ?? []);
+          onLogin({ name: user.name, email: user.email, role: roleName, permissions: rolePerms });
         } catch {
           setCurrentView('login');
         }
@@ -534,8 +543,8 @@ export function AuthLogin({ onLogin, onBack, onRegister }: AuthLoginProps) {
                 <div className="relative">
                   <CreditCard className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground pointer-events-none" />
                   <Input id="reg-docNum" value={registerForm.documentNumber}
-                    onChange={e => setRegisterForm(p => ({ ...p, documentNumber: e.target.value }))}
-                    placeholder="Número" className="pl-10 h-9 text-sm" />
+                    onChange={e => setRegisterForm(p => ({ ...p, documentNumber: e.target.value.replace(/\D/g, '').slice(0, 15) }))}
+                    placeholder="Número" className="pl-10 h-9 text-sm" maxLength={15} inputMode="numeric" />
                 </div>
               </div>
             </div>

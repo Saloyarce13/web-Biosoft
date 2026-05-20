@@ -54,7 +54,7 @@ const verifyRole = (...allowedRoles) => {
       return res.status(403).json({ success: false, message: 'Acceso denegado.' });
     }
     // Comparación case-insensitive para evitar problemas con 'admin' vs 'administrador'
-    const userRole = (req.user.role || '').toLowerCase();
+    const userRole = (typeof req.user.role === 'object' ? req.user.role?.name : req.user.role || '').toLowerCase();
     const allowed = allowedRoles.some(r => r.toLowerCase() === userRole);
     if (!allowed) {
       return res.status(403).json({
@@ -92,7 +92,7 @@ const verifyPermission = (...requiredPermissions) => {
 const verifyRoleOrPermission = ({ roles = [], permissions = [] }) => {
   return (req, res, next) => {
     if (!req.user) return res.status(403).json({ success: false, message: 'Acceso denegado.' });
-    const userRole = (req.user.role || '').toLowerCase();
+    const userRole = (typeof req.user.role === 'object' ? req.user.role?.name : req.user.role || '').toLowerCase();
     const userPerms = req.user.permissions || [];
     const hasRole = roles.some(r => r.toLowerCase() === userRole);
     const hasPerm = permissions.some(p => userPerms.includes(p));

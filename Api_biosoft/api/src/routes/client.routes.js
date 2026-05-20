@@ -1,15 +1,14 @@
-const router = require('express').Router();
-const { getAll, getOne, create, update, toggleStatus, remove } = require('../controllers/client.controller');
-const { verifyToken, verifyRole, verifyRoleOrPermission } = require('../middlewares/auth.middleware');
+// src/routes/client.routes.js
+const express = require('express');
+const router = express.Router();
+const clientController = require('../controllers/client.controller');
+const { authenticateToken } = require('../middleware/auth');
 
-const canView   = verifyRoleOrPermission({ roles: ['administrador', 'vendedor'], permissions: ['clients.view', 'clients.manage'] });
-const canManage = verifyRoleOrPermission({ roles: ['administrador', 'vendedor'], permissions: ['clients.manage'] });
-
-router.get('/',    verifyToken, canView, getAll);
-router.get('/:id', verifyToken, canView, getOne);
-router.post('/',            verifyToken, canManage, create);
-router.put('/:id',          verifyToken, canManage, update);
-router.patch('/:id/status', verifyToken, canManage, toggleStatus);
-router.delete('/:id',       verifyToken, verifyRole('administrador'), remove);
+router.get('/', authenticateToken, clientController.getAll);
+router.get('/:id', authenticateToken, clientController.getOne);
+router.post('/', authenticateToken, clientController.create);
+router.put('/:id', authenticateToken, clientController.update);
+router.patch('/:id/status', authenticateToken, clientController.toggleStatus);
+router.delete('/:id', authenticateToken, clientController.remove);
 
 module.exports = router;

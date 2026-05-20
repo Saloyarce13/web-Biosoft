@@ -1,33 +1,18 @@
-const router = require('express').Router();
-const { create, createMyOrder, list, getOne, setClient, addItems, removeItems, changeStatus, pdf } = require('../controllers/sale.controller');
-const { verifyToken, verifyRole, verifyRoleOrPermission } = require('../middlewares/auth.middleware');
+// src/routes/sale.routes.js
+const express = require('express');
+const router = express.Router();
+const saleController = require('../controllers/sale.controller');
+const { authenticateToken } = require('../middleware/auth');
 
-// Middleware que permite acceso a clientes (rol user/cliente) o a staff con permiso
-const canViewSales = (req, res, next) => {
-  if (!req.user) return res.status(401).json({ success: false, message: 'No autorizado' });
-  const role = (req.user.role || '').toLowerCase();
-  const perms = req.user.permissions || [];
-  // Clientes pueden ver sus propias ventas
-  if (role === 'user' || role === 'cliente') return next();
-  // Staff con rol o permiso
-  const staffRoles = ['administrador', 'vendedor', 'contador'];
-  if (staffRoles.includes(role) || perms.includes('sales.view') || perms.includes('sales.manage')) return next();
-  return res.status(403).json({ success: false, message: 'Acceso denegado' });
-};
-
-const canManage = verifyRoleOrPermission({ roles: ['administrador', 'vendedor'], permissions: ['sales.manage'] });
-
-router.get('/',        verifyToken, canViewSales, list);
-router.get('/:id/pdf', verifyToken, pdf);
-router.get('/:id',     verifyToken, canViewSales, getOne);
-
-// Pedido propio del cliente (sin restriccion de rol)
-router.post('/my-order', verifyToken, createMyOrder);
-
-router.post('/',            verifyToken, canManage, create);
-router.put('/:id/client',   verifyToken, canManage, setClient);
-router.post('/:id/items',   verifyToken, canManage, addItems);
-router.delete('/:id/items', verifyToken, canManage, removeItems);
-router.patch('/:id/status', verifyToken, canManage, changeStatus);
+router.get('/', authenticateToken, saleController.list);
+router.get('/:id', authenticateToken, saleController.getOne);
+router.get('/:id/pdf', authenticateToken, saleController.pdf);
+router.post('/', authenticateToken, saleController.create);
+router.post('/my-order', authenticateToken, saleController.createMyOrder);
+router.patch('/:id/status', authenticateToken, saleController.changeStatus);
+router.patch('/:id/ready', authenticateToken, saleController.markReady);
+router.patch('/:id/client', authenticateToken, saleController.setClient);
+router.post('/:id/items', authenticateToken, saleController.addItems);
+router.delete('/:id/items', authenticateToken, saleController.removeItems);
 
 module.exports = router;

@@ -5,7 +5,8 @@ import { Input } from '../../../components/ui/input';
 import { Label } from '../../../components/ui/label';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '../../../components/ui/select';
 import { toast } from 'sonner';
-import { authRegister, authLogin, apiFetch } from '../../../lib/api';
+import { authRegister, apiFetch } from '../../../lib/api';
+import { useDocumentTypesUser } from '../../../shared/contexts/SystemConfigContext';
 import {
   Leaf, Mail, Lock, User, Phone, UserPlus,
   ArrowLeft, Eye, EyeOff, CreditCard, CheckCircle, AlertTriangle
@@ -16,13 +17,8 @@ interface AuthRegisterProps {
   onBack: () => void; // volver al login
 }
 
-const DOCUMENT_TYPES = [
-  { value: 'CC',  label: 'Cédula de Ciudadanía' },
-  { value: 'CE',  label: 'Cédula de Extranjería' },
-  { value: 'TI',  label: 'Tarjeta de Identidad' },
-  { value: 'PAS', label: 'Pasaporte' },
-  { value: 'NIT', label: 'NIT' },
-];
+// Tipos de documento — se cargan desde la BD vía SystemConfigContext
+// (ver useDocumentTypesUser en el componente AuthRegister)
 
 // ── Input de contraseña con ojito ──────────────────────────────────────────────
 function PasswordInput({ id, value, onChange, placeholder, label, required }: {
@@ -86,6 +82,7 @@ function PasswordStrength({ password }: { password: string }) {
 }
 
 export function AuthRegister({ onLogin, onBack }: AuthRegisterProps) {
+  const DOCUMENT_TYPES = useDocumentTypesUser();
   const [form, setForm] = useState({
     firstName: '', lastName: '', email: '', phone: '',
     documentType: 'CC', documentNumber: '', password: '', confirmPassword: '',
@@ -153,18 +150,8 @@ export function AuthRegister({ onLogin, onBack }: AuthRegisterProps) {
         form.documentType, form.documentNumber.trim(),
       );
 
-      toast.success('¡Cuenta creada exitosamente!');
-
-      // Auto-login
-      try {
-        const loginRes = await authLogin(form.email.trim(), form.password);
-        const { token, user } = loginRes.data;
-        localStorage.setItem('authToken', token);
-        onLogin({ name: user.name, email: user.email, role: user.role, permissions: user.permissions || [] });
-      } catch {
-        toast.info('Cuenta creada. Inicia sesión con tus credenciales.');
-        onBack();
-      }
+      toast.success('¡Cuenta creada exitosamente! Inicia sesión con tus credenciales.');
+      onBack(); // vuelve al login
     } catch (error: any) {
       toast.error(error?.message || 'Error al crear la cuenta. Intenta nuevamente.');
     } finally {

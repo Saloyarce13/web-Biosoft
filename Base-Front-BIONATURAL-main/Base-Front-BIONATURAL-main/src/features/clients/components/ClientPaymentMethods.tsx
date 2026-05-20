@@ -4,30 +4,14 @@ import { Badge } from '../../../components/ui/badge';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '../../../components/ui/card';
 import { Input } from '../../../components/ui/input';
 import { Label } from '../../../components/ui/label';
-import { Separator } from '../../../components/ui/separator';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '../../../components/ui/select';
-import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, DialogTrigger } from '../../../components/ui/dialog';
+import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '../../../components/ui/dialog';
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle, AlertDialogTrigger } from '../../../components/ui/alert-dialog';
 import { toast } from 'sonner';
-import { 
-  CreditCard,
-  Plus,
-  Edit3,
-  Trash2,
-  Shield,
-  CheckCircle,
-  ArrowLeft,
-  Leaf,
-  Wallet,
-  Star
-} from 'lucide-react';
+import { CreditCard, Plus, Edit3, Trash2, Shield, CheckCircle, Wallet, Star, X, Leaf, ArrowLeft } from 'lucide-react';
 
 interface ClientPaymentMethodsProps {
-  user: {
-    name: string;
-    email: string;
-    role: string;
-  };
+  user: { name: string; email: string; role: string };
   onBack: () => void;
 }
 
@@ -43,474 +27,229 @@ interface PaymentMethod {
 }
 
 const SAMPLE_PAYMENT_METHODS: PaymentMethod[] = [
-  {
-    id: '1',
-    type: 'credit',
-    cardNumber: '**** **** **** 4532',
-    cardHolder: 'Juan Pérez García',
-    expiryDate: '12/25',
-    provider: 'Visa',
-    isDefault: true,
-    lastUsed: new Date(Date.now() - 2 * 24 * 60 * 60 * 1000)
-  },
-  {
-    id: '2',
-    type: 'debit',
-    cardNumber: '**** **** **** 8901',
-    cardHolder: 'Juan Pérez García',
-    expiryDate: '08/27',
-    provider: 'Mastercard',
-    isDefault: false,
-    lastUsed: new Date(Date.now() - 7 * 24 * 60 * 60 * 1000)
-  },
-  {
-    id: '3',
-    type: 'paypal',
-    cardNumber: 'juan.perez@email.com',
-    cardHolder: 'Juan Pérez García',
-    expiryDate: '',
-    provider: 'PayPal',
-    isDefault: false,
-    lastUsed: new Date(Date.now() - 30 * 24 * 60 * 60 * 1000)
-  }
+  { id: '1', type: 'credit', cardNumber: '**** **** **** 4532', cardHolder: 'Juan Pérez García', expiryDate: '12/25', provider: 'Visa', isDefault: true, lastUsed: new Date(Date.now() - 2 * 86400000) },
+  { id: '2', type: 'debit', cardNumber: '**** **** **** 8901', cardHolder: 'Juan Pérez García', expiryDate: '08/27', provider: 'Mastercard', isDefault: false, lastUsed: new Date(Date.now() - 7 * 86400000) },
 ];
-
-const getCardIcon = (provider: string) => {
-  return CreditCard; // En un caso real, aquí iríamos iconos específicos de cada proveedor
-};
 
 const getCardTypeLabel = (type: string) => {
   switch (type) {
-    case 'credit':
-      return 'Tarjeta de Crédito';
-    case 'debit':
-      return 'Tarjeta de Débito';
-    case 'paypal':
-      return 'PayPal';
-    case 'bank_transfer':
-      return 'Transferencia Bancaria';
-    default:
-      return 'Método de Pago';
+    case 'credit': return 'Tarjeta de Crédito';
+    case 'debit': return 'Tarjeta de Débito';
+    case 'paypal': return 'PayPal';
+    default: return 'Método de Pago';
   }
-};
-
-const validateCardNumber = (cardNumber: string): boolean => {
-  // Implementación básica del algoritmo de Luhn
-  const cleanNumber = cardNumber.replace(/\s/g, '');
-  if (!/^\d{13,19}$/.test(cleanNumber)) return false;
-  
-  let sum = 0;
-  let isEven = false;
-  
-  for (let i = cleanNumber.length - 1; i >= 0; i--) {
-    let digit = parseInt(cleanNumber[i]);
-    
-    if (isEven) {
-      digit *= 2;
-      if (digit > 9) digit -= 9;
-    }
-    
-    sum += digit;
-    isEven = !isEven;
-  }
-  
-  return sum % 10 === 0;
-};
-
-const validateExpiryDate = (expiryDate: string): boolean => {
-  const [month, year] = expiryDate.split('/');
-  if (!month || !year) return false;
-  
-  const monthNum = parseInt(month);
-  const yearNum = parseInt(`20${year}`);
-  
-  if (monthNum < 1 || monthNum > 12) return false;
-  
-  const now = new Date();
-  const expiry = new Date(yearNum, monthNum - 1);
-  
-  return expiry > now;
-};
-
-const formatCardNumber = (value: string): string => {
-  const cleanValue = value.replace(/\s/g, '');
-  const groups = cleanValue.match(/.{1,4}/g) || [];
-  return groups.join(' ').substr(0, 19); // Máximo 16 dígitos + 3 espacios
 };
 
 const maskCardNumber = (cardNumber: string): string => {
-  const cleanNumber = cardNumber.replace(/\s/g, '');
-  if (cleanNumber.length < 4) return cardNumber;
-  const lastFour = cleanNumber.slice(-4);
-  return `**** **** **** ${lastFour}`;
+  const clean = cardNumber.replace(/\s/g, '');
+  if (clean.length < 4) return cardNumber;
+  return `**** **** **** ${clean.slice(-4)}`;
+};
+
+const formatCardNumber = (value: string): string => {
+  const clean = value.replace(/\s/g, '');
+  const groups = clean.match(/.{1,4}/g) || [];
+  return groups.join(' ').substr(0, 19);
 };
 
 export function ClientPaymentMethods({ user, onBack }: ClientPaymentMethodsProps) {
   const [paymentMethods, setPaymentMethods] = useState<PaymentMethod[]>(SAMPLE_PAYMENT_METHODS);
   const [isAddingNew, setIsAddingNew] = useState(false);
   const [editingMethod, setEditingMethod] = useState<PaymentMethod | null>(null);
-  const [newPaymentMethod, setNewPaymentMethod] = useState({
-    type: 'credit' as const,
-    cardNumber: '',
-    cardHolder: '',
-    expiryDate: '',
-    provider: 'Visa',
-    isDefault: false
-  });
-
+  const [newMethod, setNewMethod] = useState<{ type: 'credit' | 'debit' | 'paypal' | 'bank_transfer'; cardNumber: string; cardHolder: string; expiryDate: string; provider: string; isDefault: boolean; }>({ type: 'credit', cardNumber: '', cardHolder: '', expiryDate: '', provider: 'Visa', isDefault: false });
   const [errors, setErrors] = useState<Record<string, string>>({});
 
-  const validateForm = (method: typeof newPaymentMethod) => {
-    const newErrors: Record<string, string> = {};
-
-    if (!method.cardHolder.trim()) {
-      newErrors.cardHolder = 'El nombre del titular es requerido';
-    }
-
-    if (method.type !== 'paypal') {
-      if (!method.cardNumber.trim()) {
-        newErrors.cardNumber = 'El número de tarjeta es requerido';
-      } else if (!validateCardNumber(method.cardNumber)) {
-        newErrors.cardNumber = 'Número de tarjeta inválido';
-      }
-
-      if (!method.expiryDate.trim()) {
-        newErrors.expiryDate = 'La fecha de vencimiento es requerida';
-      } else if (!validateExpiryDate(method.expiryDate)) {
-        newErrors.expiryDate = 'Fecha de vencimiento inválida';
-      }
+  const validate = (m: typeof newMethod) => {
+    const errs: Record<string, string> = {};
+    if (!m.cardHolder.trim()) errs.cardHolder = 'El nombre del titular es requerido';
+    if (m.type !== 'paypal') {
+      if (!m.cardNumber.trim()) errs.cardNumber = 'El número de tarjeta es requerido';
+      if (!m.expiryDate.trim()) errs.expiryDate = 'La fecha de vencimiento es requerida';
     } else {
-      if (!method.cardNumber.includes('@')) {
-        newErrors.cardNumber = 'Email inválido para PayPal';
-      }
+      if (!m.cardNumber.includes('@')) errs.cardNumber = 'Email inválido para PayPal';
     }
-
-    setErrors(newErrors);
-    return Object.keys(newErrors).length === 0;
+    setErrors(errs);
+    return Object.keys(errs).length === 0;
   };
 
-  const handleAddPaymentMethod = () => {
-    if (!validateForm(newPaymentMethod)) return;
-
-    const newMethod: PaymentMethod = {
-      id: Date.now().toString(),
-      ...newPaymentMethod,
-      cardNumber: newPaymentMethod.type === 'paypal' 
-        ? newPaymentMethod.cardNumber 
-        : maskCardNumber(newPaymentMethod.cardNumber)
+  const handleAdd = () => {
+    if (!validate(newMethod)) return;
+    const created: PaymentMethod = {
+      id: Date.now().toString(), ...newMethod,
+      cardNumber: newMethod.type === 'paypal' ? newMethod.cardNumber : maskCardNumber(newMethod.cardNumber),
     };
-
-    // Si es el primer método o se marca como predeterminado
-    if (paymentMethods.length === 0 || newPaymentMethod.isDefault) {
-      setPaymentMethods(prev => [
-        ...prev.map(method => ({ ...method, isDefault: false })),
-        { ...newMethod, isDefault: true }
-      ]);
+    if (paymentMethods.length === 0 || newMethod.isDefault) {
+      setPaymentMethods(prev => [...prev.map(m => ({ ...m, isDefault: false })), { ...created, isDefault: true }]);
     } else {
-      setPaymentMethods(prev => [...prev, newMethod]);
+      setPaymentMethods(prev => [...prev, created]);
     }
-
-    setNewPaymentMethod({
-      type: 'credit',
-      cardNumber: '',
-      cardHolder: '',
-      expiryDate: '',
-      provider: 'Visa',
-      isDefault: false
-    });
+    setNewMethod({ type: 'credit', cardNumber: '', cardHolder: '', expiryDate: '', provider: 'Visa', isDefault: false });
     setIsAddingNew(false);
-    toast.success('Método de pago agregado exitosamente');
+    toast.success('Método de pago agregado');
   };
 
-  const handleEditPaymentMethod = () => {
-    if (!editingMethod || !validateForm({
-      type: editingMethod.type,
-      cardNumber: editingMethod.cardNumber,
-      cardHolder: editingMethod.cardHolder,
-      expiryDate: editingMethod.expiryDate,
-      provider: editingMethod.provider,
-      isDefault: editingMethod.isDefault
-    })) return;
-
-    setPaymentMethods(prev => 
-      prev.map(method => 
-        method.id === editingMethod.id ? editingMethod : method
-      )
-    );
+  const handleEdit = () => {
+    if (!editingMethod) return;
+    setPaymentMethods(prev => prev.map(m => m.id === editingMethod.id ? editingMethod : m));
     setEditingMethod(null);
-    toast.success('Método de pago actualizado exitosamente');
+    toast.success('Método de pago actualizado');
   };
 
-  const handleDeletePaymentMethod = (id: string) => {
-    const methodToDelete = paymentMethods.find(m => m.id === id);
-    if (methodToDelete?.isDefault && paymentMethods.length > 1) {
-      // Si se elimina el método predeterminado, hacer predeterminado al siguiente
-      const remainingMethods = paymentMethods.filter(m => m.id !== id);
-      remainingMethods[0].isDefault = true;
-      setPaymentMethods(remainingMethods);
-    } else {
-      setPaymentMethods(prev => prev.filter(method => method.id !== id));
-    }
+  const handleDelete = (id: string) => {
+    const toDelete = paymentMethods.find(m => m.id === id);
+    const remaining = paymentMethods.filter(m => m.id !== id);
+    if (toDelete?.isDefault && remaining.length > 0) remaining[0].isDefault = true;
+    setPaymentMethods(remaining);
     toast.success('Método de pago eliminado');
   };
 
   const handleSetDefault = (id: string) => {
-    setPaymentMethods(prev => 
-      prev.map(method => ({
-        ...method,
-        isDefault: method.id === id
-      }))
-    );
-    toast.success('Método de pago predeterminado actualizado');
+    setPaymentMethods(prev => prev.map(m => ({ ...m, isDefault: m.id === id })));
+    toast.success('Método predeterminado actualizado');
   };
 
   return (
-    <div className="min-h-screen bg-background">
-      {/* Header */}
-      <div className="border-b p-4 bg-background">
-        <div className="flex items-center justify-between max-w-4xl mx-auto">
-          <div className="flex items-center gap-3">
-            <Button 
-              variant="outline" 
-              size="sm"
-              onClick={onBack}
-              className="flex items-center gap-2"
-            >
-              <ArrowLeft className="h-4 w-4" />
-              Volver
-            </Button>
-            <div className="flex items-center gap-2">
-              <Leaf className="h-6 w-6 text-primary" />
-              <h1>Mis Métodos de Pago</h1>
+    <div style={{ minHeight: '100vh', backgroundColor: '#F5F7FA', fontFamily: 'Inter, system-ui, sans-serif' }}>
+
+      {/* Header — igual al de la tienda */}
+      <header style={{ position: 'sticky', top: 0, zIndex: 30, borderBottom: '1px solid #E5E5E2', backgroundColor: 'rgba(255,255,255,0.95)', backdropFilter: 'blur(12px)' }}>
+        <div style={{ maxWidth: 1280, margin: '0 auto', padding: '0 24px', height: 60, display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+            <div style={{ width: 34, height: 34, borderRadius: 10, backgroundColor: '#E8F5E9', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+              <Leaf style={{ width: 17, height: 17, color: '#3A7D44' }} />
+            </div>
+            <div>
+              <span style={{ fontSize: 15, fontWeight: 700, color: '#1C1C1A', letterSpacing: '-0.02em', display: 'block', lineHeight: 1.2 }}>Bionatural</span>
+              <span style={{ fontSize: 11, color: '#737370', display: 'block', lineHeight: 1 }}>Tienda Naturista</span>
             </div>
           </div>
-          
-          <Button 
-            onClick={() => setIsAddingNew(true)}
-            className="flex items-center gap-2"
-          >
-            <Plus className="h-4 w-4" />
-            Agregar Método
-          </Button>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+            <CreditCard style={{ width: 15, height: 15, color: '#1C1C1A' }} />
+            <span style={{ fontSize: 15, fontWeight: 700, color: '#1C1C1A' }}>Métodos de Pago</span>
+          </div>
+          <div style={{ display: 'flex', gap: 8 }}>
+            <button onClick={() => setIsAddingNew(true)} style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 13, fontWeight: 600, color: 'white', backgroundColor: '#3A7D44', border: 'none', cursor: 'pointer', padding: '7px 14px', borderRadius: 8 }}
+              onMouseEnter={e => (e.currentTarget.style.backgroundColor = '#2D6A4F')}
+              onMouseLeave={e => (e.currentTarget.style.backgroundColor = '#3A7D44')}>
+              <Plus style={{ width: 13, height: 13 }} /> Agregar
+            </button>
+            <button onClick={onBack} style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 13, color: '#737370', background: 'none', border: '1px solid #E5E5E2', cursor: 'pointer', padding: '6px 12px', borderRadius: 8, backgroundColor: 'white' }}
+              onMouseEnter={e => (e.currentTarget.style.backgroundColor = '#F4F4F2')}
+              onMouseLeave={e => (e.currentTarget.style.backgroundColor = 'white')}>
+              <ArrowLeft style={{ width: 14, height: 14 }} /> Volver
+            </button>
+          </div>
         </div>
-      </div>
+      </header>
 
-      <div className="max-w-4xl mx-auto p-6 space-y-6">
+      <div style={{ maxWidth: 680, margin: '0 auto', padding: '20px 16px 32px', display: 'flex', flexDirection: 'column', gap: 16 }}>
+
         {/* Stats */}
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-          <Card>
-            <CardContent className="p-4">
-              <div className="flex items-center gap-3">
-                <div className="p-2 rounded-full bg-blue-100">
-                  <Wallet className="h-5 w-5 text-blue-600" />
-                </div>
-                <div>
-                  <p className="text-sm text-muted-foreground">Total</p>
-                  <p className="text-xl font-semibold">{paymentMethods.length}</p>
-                </div>
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 12 }}>
+          {[
+            { icon: Wallet, label: 'Total', value: String(paymentMethods.length), color: '#3B82F6', bg: '#EFF6FF' },
+            { icon: Star, label: 'Predeterminado', value: paymentMethods.find(m => m.isDefault)?.provider || 'N/A', color: '#F59E0B', bg: '#FFFBEB' },
+            { icon: Shield, label: 'Seguridad', value: '100%', color: '#10B981', bg: '#ECFDF5' },
+          ].map(({ icon: Icon, label, value, color, bg }) => (
+            <div key={label} style={{ backgroundColor: 'white', borderRadius: 16, padding: '14px', boxShadow: '0 2px 8px rgba(0,0,0,0.05)', border: '1px solid #F0F0EE', textAlign: 'center' }}>
+              <div style={{ width: 36, height: 36, borderRadius: 10, backgroundColor: bg, display: 'flex', alignItems: 'center', justifyContent: 'center', margin: '0 auto 8px' }}>
+                <Icon style={{ width: 16, height: 16, color }} />
               </div>
-            </CardContent>
-          </Card>
-
-          <Card>
-            <CardContent className="p-4">
-              <div className="flex items-center gap-3">
-                <div className="p-2 rounded-full bg-green-100">
-                  <Star className="h-5 w-5 text-green-600" />
-                </div>
-                <div>
-                  <p className="text-sm text-muted-foreground">Predeterminado</p>
-                  <p className="text-xl font-semibold">
-                    {paymentMethods.find(m => m.isDefault)?.provider || 'N/A'}
-                  </p>
-                </div>
-              </div>
-            </CardContent>
-          </Card>
-
-          <Card>
-            <CardContent className="p-4">
-              <div className="flex items-center gap-3">
-                <div className="p-2 rounded-full bg-purple-100">
-                  <Shield className="h-5 w-5 text-purple-600" />
-                </div>
-                <div>
-                  <p className="text-sm text-muted-foreground">Seguridad</p>
-                  <p className="text-xl font-semibold">100%</p>
-                </div>
-              </div>
-            </CardContent>
-          </Card>
+              <p style={{ fontSize: 15, fontWeight: 800, color: '#1C1C1A', margin: 0 }}>{value}</p>
+              <p style={{ fontSize: 11, color: '#9CA3AF', margin: '2px 0 0' }}>{label}</p>
+            </div>
+          ))}
         </div>
 
-        {/* Payment Methods List */}
-        <Card>
-          <CardHeader>
-            <CardTitle className="flex items-center gap-2">
-              <CreditCard className="h-5 w-5" />
-              Métodos de Pago Guardados
-            </CardTitle>
-            <CardDescription>
-              Gestiona tus métodos de pago de forma segura
-            </CardDescription>
-          </CardHeader>
-          <CardContent>
-            {paymentMethods.length === 0 ? (
-              <div className="text-center py-12">
-                <CreditCard className="h-12 w-12 text-muted-foreground mx-auto mb-4" />
-                <h3 className="font-medium mb-2">No tienes métodos de pago</h3>
-                <p className="text-muted-foreground mb-4">
-                  Agrega tu primer método de pago para realizar compras fácilmente.
-                </p>
-                <Button onClick={() => setIsAddingNew(true)}>
-                  <Plus className="h-4 w-4 mr-2" />
-                  Agregar Método de Pago
-                </Button>
-              </div>
-            ) : (
-              <div className="space-y-4">
-                {paymentMethods.map((method) => {
-                  const CardIcon = getCardIcon(method.provider);
-                  
-                  return (
-                    <Card key={method.id} className={`${method.isDefault ? 'border-primary bg-primary/5' : ''}`}>
-                      <CardContent className="p-4">
-                        <div className="flex items-center justify-between">
-                          <div className="flex items-center gap-4">
-                            <div className="p-3 bg-gray-100 rounded-lg">
-                              <CardIcon className="h-6 w-6 text-gray-600" />
-                            </div>
-                            
-                            <div>
-                              <div className="flex items-center gap-2 mb-1">
-                                <h3 className="font-medium">{getCardTypeLabel(method.type)}</h3>
-                                {method.isDefault && (
-                                  <Badge className="bg-primary text-primary-foreground text-xs">
-                                    Predeterminado
-                                  </Badge>
-                                )}
-                              </div>
-                              <p className="text-sm text-muted-foreground">
-                                {method.cardNumber} • {method.provider}
-                              </p>
-                              <p className="text-sm text-muted-foreground">
-                                {method.cardHolder}
-                              </p>
-                              {method.expiryDate && (
-                                <p className="text-xs text-muted-foreground">
-                                  Vence: {method.expiryDate}
-                                </p>
-                              )}
-                              {method.lastUsed && (
-                                <p className="text-xs text-muted-foreground">
-                                  Último uso: {method.lastUsed.toLocaleDateString('es-ES')}
-                                </p>
-                              )}
-                            </div>
-                          </div>
-                          
-                          <div className="flex items-center gap-2">
-                            {!method.isDefault && (
-                              <Button 
-                                variant="outline" 
-                                size="sm"
-                                onClick={() => handleSetDefault(method.id)}
-                              >
-                                <Star className="h-3 w-3 mr-1" />
-                                Predeterminado
-                              </Button>
-                            )}
-                            
-                            <Button 
-                              variant="outline" 
-                              size="sm"
-                              onClick={() => setEditingMethod(method)}
-                            >
-                              <Edit3 className="h-3 w-3" />
-                            </Button>
-                            
-                            <AlertDialog>
-                              <AlertDialogTrigger asChild>
-                                <Button 
-                                  variant="outline" 
-                                  size="sm"
-                                  className="text-red-600 hover:text-red-700"
-                                >
-                                  <Trash2 className="h-3 w-3" />
-                                </Button>
-                              </AlertDialogTrigger>
-                              <AlertDialogContent>
-                                <AlertDialogHeader>
-                                  <AlertDialogTitle>¿Eliminar método de pago?</AlertDialogTitle>
-                                  <AlertDialogDescription>
-                                    Esta acción no se puede deshacer. El método de pago será eliminado permanentemente.
-                                  </AlertDialogDescription>
-                                </AlertDialogHeader>
-                                <AlertDialogFooter>
-                                  <AlertDialogCancel>Cancelar</AlertDialogCancel>
-                                  <AlertDialogAction 
-                                    onClick={() => handleDeletePaymentMethod(method.id)}
-                                    className="bg-red-600 hover:bg-red-700"
-                                  >
-                                    Eliminar
-                                  </AlertDialogAction>
-                                </AlertDialogFooter>
-                              </AlertDialogContent>
-                            </AlertDialog>
-                          </div>
-                        </div>
-                      </CardContent>
-                    </Card>
-                  );
-                })}
-              </div>
-            )}
-          </CardContent>
-        </Card>
+        {/* Lista de métodos */}
+        <div style={{ backgroundColor: 'white', borderRadius: 20, padding: '20px', boxShadow: '0 2px 8px rgba(0,0,0,0.05)', border: '1px solid #F0F0EE' }}>
+          <p style={{ fontSize: 12, fontWeight: 700, color: '#9CA3AF', textTransform: 'uppercase', letterSpacing: '0.06em', margin: '0 0 16px' }}>Métodos guardados</p>
 
-        {/* Security Info */}
-        <Card>
-          <CardHeader>
-            <CardTitle className="flex items-center gap-2">
-              <Shield className="h-5 w-5 text-green-600" />
-              Seguridad
-            </CardTitle>
-          </CardHeader>
-          <CardContent>
-            <div className="flex items-start gap-3">
-              <CheckCircle className="h-5 w-5 text-green-600 mt-0.5" />
-              <div className="space-y-2">
-                <p className="font-medium">Tus datos están protegidos</p>
-                <p className="text-sm text-muted-foreground">
-                  Utilizamos encriptación de nivel bancario para proteger toda tu información de pago. 
-                  Nunca almacenamos los números completos de tarjeta ni códigos de seguridad.
-                </p>
+          {paymentMethods.length === 0 ? (
+            <div style={{ textAlign: 'center', padding: '40px 0' }}>
+              <div style={{ width: 56, height: 56, borderRadius: 16, backgroundColor: '#F0F4EF', display: 'flex', alignItems: 'center', justifyContent: 'center', margin: '0 auto 12px' }}>
+                <CreditCard style={{ width: 24, height: 24, color: '#3A7D44' }} />
               </div>
+              <p style={{ fontSize: 15, fontWeight: 700, color: '#1C1C1A', marginBottom: 6 }}>Sin métodos de pago</p>
+              <p style={{ fontSize: 13, color: '#737370', marginBottom: 20 }}>Agrega tu primer método para comprar fácilmente</p>
+              <button onClick={() => setIsAddingNew(true)} style={{ display: 'inline-flex', alignItems: 'center', gap: 6, padding: '10px 20px', borderRadius: 10, backgroundColor: '#3A7D44', color: 'white', fontSize: 13, fontWeight: 600, border: 'none', cursor: 'pointer' }}>
+                <Plus style={{ width: 14, height: 14 }} /> Agregar método
+              </button>
             </div>
-          </CardContent>
-        </Card>
+          ) : (
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+              {paymentMethods.map(method => (
+                <div key={method.id} style={{ padding: '14px 16px', borderRadius: 14, backgroundColor: method.isDefault ? '#F0FDF4' : '#F9FAFB', border: `1.5px solid ${method.isDefault ? '#BBF7D0' : '#F0F0EE'}` }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 14 }}>
+                    <div style={{ width: 44, height: 44, borderRadius: 12, backgroundColor: method.isDefault ? '#D1FAE5' : '#F0F0EE', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
+                      <CreditCard style={{ width: 20, height: 20, color: method.isDefault ? '#3A7D44' : '#6B7280' }} />
+                    </div>
+                    <div style={{ flex: 1, minWidth: 0 }}>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 2 }}>
+                        <span style={{ fontSize: 14, fontWeight: 700, color: '#1C1C1A' }}>{getCardTypeLabel(method.type)}</span>
+                        {method.isDefault && <span style={{ fontSize: 10, fontWeight: 700, color: '#065F46', backgroundColor: '#D1FAE5', padding: '2px 8px', borderRadius: 99 }}>Predeterminado</span>}
+                      </div>
+                      <p style={{ fontSize: 13, color: '#737370', margin: 0 }}>{method.cardNumber} · {method.provider}</p>
+                      <p style={{ fontSize: 12, color: '#9CA3AF', margin: '1px 0 0' }}>{method.cardHolder}{method.expiryDate ? ` · Vence ${method.expiryDate}` : ''}</p>
+                    </div>
+                    <div style={{ display: 'flex', gap: 6, flexShrink: 0 }}>
+                      {!method.isDefault && (
+                        <button onClick={() => handleSetDefault(method.id)} style={{ fontSize: 11, fontWeight: 600, color: '#3A7D44', backgroundColor: '#F0FDF4', border: '1px solid #BBF7D0', borderRadius: 8, padding: '5px 10px', cursor: 'pointer' }}>
+                          <Star style={{ width: 12, height: 12, display: 'inline', marginRight: 3 }} />Predeterminar
+                        </button>
+                      )}
+                      <button onClick={() => setEditingMethod(method)} style={{ width: 32, height: 32, borderRadius: 8, backgroundColor: '#EFF6FF', border: 'none', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                        <Edit3 style={{ width: 13, height: 13, color: '#3B82F6' }} />
+                      </button>
+                      <AlertDialog>
+                        <AlertDialogTrigger asChild>
+                          <button style={{ width: 32, height: 32, borderRadius: 8, backgroundColor: '#FEF2F2', border: 'none', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                            <Trash2 style={{ width: 13, height: 13, color: '#EF4444' }} />
+                          </button>
+                        </AlertDialogTrigger>
+                        <AlertDialogContent>
+                          <AlertDialogHeader>
+                            <AlertDialogTitle>¿Eliminar método de pago?</AlertDialogTitle>
+                            <AlertDialogDescription>Esta acción no se puede deshacer.</AlertDialogDescription>
+                          </AlertDialogHeader>
+                          <AlertDialogFooter>
+                            <AlertDialogCancel>Cancelar</AlertDialogCancel>
+                            <AlertDialogAction onClick={() => handleDelete(method.id)} className="bg-destructive text-destructive-foreground hover:bg-destructive/90">Eliminar</AlertDialogAction>
+                          </AlertDialogFooter>
+                        </AlertDialogContent>
+                      </AlertDialog>
+                    </div>
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+
+        {/* Seguridad */}
+        <div style={{ backgroundColor: 'white', borderRadius: 20, padding: '18px 20px', boxShadow: '0 2px 8px rgba(0,0,0,0.05)', border: '1px solid #F0F0EE', display: 'flex', alignItems: 'flex-start', gap: 14 }}>
+          <div style={{ width: 40, height: 40, borderRadius: 12, backgroundColor: '#ECFDF5', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
+            <Shield style={{ width: 18, height: 18, color: '#10B981' }} />
+          </div>
+          <div>
+            <p style={{ fontSize: 14, fontWeight: 700, color: '#1C1C1A', margin: '0 0 4px' }}>Tus datos están protegidos</p>
+            <p style={{ fontSize: 13, color: '#737370', margin: 0, lineHeight: 1.6 }}>Usamos encriptación de nivel bancario. Nunca almacenamos números completos de tarjeta ni códigos de seguridad.</p>
+          </div>
+        </div>
       </div>
 
-      {/* Add Payment Method Dialog */}
+      {/* Dialog agregar */}
       <Dialog open={isAddingNew} onOpenChange={setIsAddingNew}>
         <DialogContent className="sm:max-w-md">
           <DialogHeader>
             <DialogTitle>Agregar Método de Pago</DialogTitle>
-            <DialogDescription>
-              Agrega un nuevo método de pago de forma segura
-            </DialogDescription>
+            <DialogDescription>Agrega un nuevo método de forma segura</DialogDescription>
           </DialogHeader>
-          
-          <div className="space-y-4">
-            <div>
-              <Label htmlFor="type">Tipo de Método</Label>
-              <Select 
-                value={newPaymentMethod.type} 
-                onValueChange={(value: any) => setNewPaymentMethod(prev => ({ ...prev, type: value }))}
-              >
-                <SelectTrigger>
-                  <SelectValue />
-                </SelectTrigger>
+          <div className="space-y-3">
+            <div className="space-y-1">
+              <Label className="text-xs">Tipo</Label>
+              <Select value={newMethod.type} onValueChange={(v: any) => setNewMethod(p => ({ ...p, type: v }))}>
+                <SelectTrigger className="h-9 text-sm"><SelectValue /></SelectTrigger>
                 <SelectContent>
                   <SelectItem value="credit">Tarjeta de Crédito</SelectItem>
                   <SelectItem value="debit">Tarjeta de Débito</SelectItem>
@@ -518,74 +257,32 @@ export function ClientPaymentMethods({ user, onBack }: ClientPaymentMethodsProps
                 </SelectContent>
               </Select>
             </div>
-
-            <div>
-              <Label htmlFor="cardHolder">Titular</Label>
-              <Input
-                id="cardHolder"
-                placeholder="Nombre del titular"
-                value={newPaymentMethod.cardHolder}
-                onChange={(e) => setNewPaymentMethod(prev => ({ ...prev, cardHolder: e.target.value }))}
-                className={errors.cardHolder ? 'border-red-500' : ''}
-              />
-              {errors.cardHolder && (
-                <p className="text-red-500 text-sm mt-1">{errors.cardHolder}</p>
-              )}
+            <div className="space-y-1">
+              <Label className="text-xs">Titular</Label>
+              <Input value={newMethod.cardHolder} onChange={e => setNewMethod(p => ({ ...p, cardHolder: e.target.value }))} placeholder="Nombre del titular" className={`h-9 text-sm ${errors.cardHolder ? 'border-destructive' : ''}`} />
+              {errors.cardHolder && <p className="text-xs text-destructive">{errors.cardHolder}</p>}
             </div>
-
-            <div>
-              <Label htmlFor="cardNumber">
-                {newPaymentMethod.type === 'paypal' ? 'Email de PayPal' : 'Número de Tarjeta'}
-              </Label>
-              <Input
-                id="cardNumber"
-                placeholder={newPaymentMethod.type === 'paypal' ? 'email@ejemplo.com' : '1234 5678 9012 3456'}
-                value={newPaymentMethod.cardNumber}
-                onChange={(e) => {
-                  const value = newPaymentMethod.type === 'paypal' 
-                    ? e.target.value 
-                    : formatCardNumber(e.target.value);
-                  setNewPaymentMethod(prev => ({ ...prev, cardNumber: value }));
-                }}
-                className={errors.cardNumber ? 'border-red-500' : ''}
-              />
-              {errors.cardNumber && (
-                <p className="text-red-500 text-sm mt-1">{errors.cardNumber}</p>
-              )}
+            <div className="space-y-1">
+              <Label className="text-xs">{newMethod.type === 'paypal' ? 'Email de PayPal' : 'Número de Tarjeta'}</Label>
+              <Input value={newMethod.cardNumber}
+                onChange={e => setNewMethod(p => ({ ...p, cardNumber: newMethod.type === 'paypal' ? e.target.value : formatCardNumber(e.target.value) }))}
+                placeholder={newMethod.type === 'paypal' ? 'email@ejemplo.com' : '1234 5678 9012 3456'}
+                className={`h-9 text-sm ${errors.cardNumber ? 'border-destructive' : ''}`} />
+              {errors.cardNumber && <p className="text-xs text-destructive">{errors.cardNumber}</p>}
             </div>
-
-            {newPaymentMethod.type !== 'paypal' && (
-              <div className="grid grid-cols-2 gap-4">
-                <div>
-                  <Label htmlFor="expiryDate">Vencimiento</Label>
-                  <Input
-                    id="expiryDate"
-                    placeholder="MM/YY"
-                    value={newPaymentMethod.expiryDate}
-                    onChange={(e) => {
-                      let value = e.target.value.replace(/\D/g, '');
-                      if (value.length >= 2) {
-                        value = value.substr(0, 2) + '/' + value.substr(2, 2);
-                      }
-                      setNewPaymentMethod(prev => ({ ...prev, expiryDate: value }));
-                    }}
-                    maxLength={5}
-                    className={errors.expiryDate ? 'border-red-500' : ''}
-                  />
-                  {errors.expiryDate && (
-                    <p className="text-red-500 text-sm mt-1">{errors.expiryDate}</p>
-                  )}
+            {newMethod.type !== 'paypal' && (
+              <div className="grid grid-cols-2 gap-3">
+                <div className="space-y-1">
+                  <Label className="text-xs">Vencimiento</Label>
+                  <Input value={newMethod.expiryDate}
+                    onChange={e => { let v = e.target.value.replace(/\D/g, ''); if (v.length >= 2) v = v.substr(0, 2) + '/' + v.substr(2, 2); setNewMethod(p => ({ ...p, expiryDate: v })); }}
+                    placeholder="MM/YY" maxLength={5} className={`h-9 text-sm ${errors.expiryDate ? 'border-destructive' : ''}`} />
+                  {errors.expiryDate && <p className="text-xs text-destructive">{errors.expiryDate}</p>}
                 </div>
-
-                <div>
-                  <Label htmlFor="provider">Proveedor</Label>
-                  <Select 
-                    value={newPaymentMethod.provider} 
-                    onValueChange={(value) => setNewPaymentMethod(prev => ({ ...prev, provider: value }))}
-                  >
-                    <SelectTrigger>
-                      <SelectValue />
-                    </SelectTrigger>
+                <div className="space-y-1">
+                  <Label className="text-xs">Proveedor</Label>
+                  <Select value={newMethod.provider} onValueChange={v => setNewMethod(p => ({ ...p, provider: v }))}>
+                    <SelectTrigger className="h-9 text-sm"><SelectValue /></SelectTrigger>
                     <SelectContent>
                       <SelectItem value="Visa">Visa</SelectItem>
                       <SelectItem value="Mastercard">Mastercard</SelectItem>
@@ -595,107 +292,44 @@ export function ClientPaymentMethods({ user, onBack }: ClientPaymentMethodsProps
                 </div>
               </div>
             )}
-
-            {newPaymentMethod.type === 'paypal' && (
-              <div>
-                <Label htmlFor="provider">Proveedor</Label>
-                <Input
-                  value="PayPal"
-                  disabled
-                  className="bg-muted"
-                />
-              </div>
-            )}
-
-            <div className="flex items-center space-x-2">
-              <input
-                type="checkbox"
-                id="isDefault"
-                checked={newPaymentMethod.isDefault}
-                onChange={(e) => setNewPaymentMethod(prev => ({ ...prev, isDefault: e.target.checked }))}
-                className="rounded border-gray-300"
-              />
-              <Label htmlFor="isDefault" className="text-sm">
-                Usar como método predeterminado
-              </Label>
-            </div>
           </div>
-
-          <div className="flex gap-2 justify-end">
-            <Button variant="outline" onClick={() => setIsAddingNew(false)}>
-              Cancelar
-            </Button>
-            <Button onClick={handleAddPaymentMethod}>
-              <Plus className="h-4 w-4 mr-2" />
-              Agregar
-            </Button>
+          <div className="flex gap-2 justify-end pt-2">
+            <button onClick={() => setIsAddingNew(false)} style={{ padding: '8px 16px', borderRadius: 10, border: '1.5px solid #E5E7EB', backgroundColor: 'white', fontSize: 13, fontWeight: 500, cursor: 'pointer', color: '#374151' }}>Cancelar</button>
+            <button onClick={handleAdd} style={{ padding: '8px 20px', borderRadius: 10, border: 'none', backgroundColor: '#3A7D44', color: 'white', fontSize: 13, fontWeight: 600, cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 6 }}>
+              <Plus style={{ width: 13, height: 13 }} /> Agregar
+            </button>
           </div>
         </DialogContent>
       </Dialog>
 
-      {/* Edit Payment Method Dialog */}
+      {/* Dialog editar */}
       <Dialog open={!!editingMethod} onOpenChange={() => setEditingMethod(null)}>
         <DialogContent className="sm:max-w-md">
           <DialogHeader>
             <DialogTitle>Editar Método de Pago</DialogTitle>
-            <DialogDescription>
-              Actualiza la información de tu método de pago
-            </DialogDescription>
+            <DialogDescription>Actualiza la información</DialogDescription>
           </DialogHeader>
-          
           {editingMethod && (
-            <div className="space-y-4">
-              <div>
-                <Label htmlFor="edit-cardHolder">Titular</Label>
-                <Input
-                  id="edit-cardHolder"
-                  value={editingMethod.cardHolder}
-                  onChange={(e) => setEditingMethod(prev => prev ? ({ ...prev, cardHolder: e.target.value }) : null)}
-                />
+            <div className="space-y-3">
+              <div className="space-y-1">
+                <Label className="text-xs">Titular</Label>
+                <Input value={editingMethod.cardHolder} onChange={e => setEditingMethod(p => p ? { ...p, cardHolder: e.target.value } : null)} className="h-9 text-sm" />
               </div>
-
               {editingMethod.type !== 'paypal' && (
-                <div>
-                  <Label htmlFor="edit-expiryDate">Vencimiento</Label>
-                  <Input
-                    id="edit-expiryDate"
-                    placeholder="MM/YY"
-                    value={editingMethod.expiryDate}
-                    onChange={(e) => {
-                      let value = e.target.value.replace(/\D/g, '');
-                      if (value.length >= 2) {
-                        value = value.substr(0, 2) + '/' + value.substr(2, 2);
-                      }
-                      setEditingMethod(prev => prev ? ({ ...prev, expiryDate: value }) : null);
-                    }}
-                    maxLength={5}
-                  />
+                <div className="space-y-1">
+                  <Label className="text-xs">Vencimiento</Label>
+                  <Input value={editingMethod.expiryDate}
+                    onChange={e => { let v = e.target.value.replace(/\D/g, ''); if (v.length >= 2) v = v.substr(0, 2) + '/' + v.substr(2, 2); setEditingMethod(p => p ? { ...p, expiryDate: v } : null); }}
+                    placeholder="MM/YY" maxLength={5} className="h-9 text-sm" />
                 </div>
               )}
-
-              <div className="flex items-center space-x-2">
-                <input
-                  type="checkbox"
-                  id="edit-isDefault"
-                  checked={editingMethod.isDefault}
-                  onChange={(e) => setEditingMethod(prev => prev ? ({ ...prev, isDefault: e.target.checked }) : null)}
-                  className="rounded border-gray-300"
-                />
-                <Label htmlFor="edit-isDefault" className="text-sm">
-                  Usar como método predeterminado
-                </Label>
-              </div>
             </div>
           )}
-
-          <div className="flex gap-2 justify-end">
-            <Button variant="outline" onClick={() => setEditingMethod(null)}>
-              Cancelar
-            </Button>
-            <Button onClick={handleEditPaymentMethod}>
-              <CheckCircle className="h-4 w-4 mr-2" />
-              Guardar Cambios
-            </Button>
+          <div className="flex gap-2 justify-end pt-2">
+            <button onClick={() => setEditingMethod(null)} style={{ padding: '8px 16px', borderRadius: 10, border: '1.5px solid #E5E7EB', backgroundColor: 'white', fontSize: 13, fontWeight: 500, cursor: 'pointer', color: '#374151' }}>Cancelar</button>
+            <button onClick={handleEdit} style={{ padding: '8px 20px', borderRadius: 10, border: 'none', backgroundColor: '#3A7D44', color: 'white', fontSize: 13, fontWeight: 600, cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 6 }}>
+              <CheckCircle style={{ width: 13, height: 13 }} /> Guardar
+            </button>
           </div>
         </DialogContent>
       </Dialog>

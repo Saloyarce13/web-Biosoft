@@ -1,15 +1,20 @@
-const router = require('express').Router();
-const { getAll, getOne, create, update, updateStock, remove } = require('../controllers/product.controller');
-const { verifyToken, verifyRole, verifyRoleOrPermission } = require('../middlewares/auth.middleware');
+// src/routes/product.routes.js
+const express = require('express');
+const router = express.Router();
+const productController = require('../controllers/product.controller');
+const { authenticateToken, optionalAuth } = require('../middleware/auth');
 
-const canView   = verifyRoleOrPermission({ roles: ['administrador', 'vendedor', 'bodega'], permissions: ['products.view', 'products.manage'] });
-const canManage = verifyRoleOrPermission({ roles: ['administrador', 'vendedor', 'bodega'], permissions: ['products.manage'] });
+// Rutas públicas (con autenticación opcional)
+router.get('/', optionalAuth, productController.getAll);
+router.get('/search', optionalAuth, productController.searchProducts);
+router.get('/featured', optionalAuth, productController.getFeatured);
+router.get('/low-stock', authenticateToken, productController.getLowStock);
+router.get('/:id', optionalAuth, productController.getOne);
 
-router.get('/', getAll);
-router.get('/:id', getOne);
-router.post('/',           verifyToken, canManage, create);
-router.put('/:id',         verifyToken, canManage, update);
-router.patch('/:id/stock', verifyToken, canManage, updateStock);
-router.delete('/:id',      verifyToken, verifyRole('administrador'), remove);
+// Rutas protegidas (requieren autenticación)
+router.post('/', authenticateToken, productController.create);
+router.put('/:id', authenticateToken, productController.update);
+router.patch('/:id/stock', authenticateToken, productController.updateStock);
+router.delete('/:id', authenticateToken, productController.remove);
 
 module.exports = router;

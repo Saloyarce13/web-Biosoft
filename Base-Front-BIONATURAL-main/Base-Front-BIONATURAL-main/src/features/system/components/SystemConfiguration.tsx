@@ -265,7 +265,7 @@ export function SystemConfiguration({ userRole }: SystemConfigurationProps) {
     }));
   };
 
-  const updateNotificationConfig = (section: keyof NotificationConfig, field: string, value: any) => {
+  const updateNotificationConfig = (section: keyof Omit<NotificationConfig, 'notificationFrequency'>, field: string, value: any) => {
     setNotificationConfig(prev => ({
       ...prev,
       [section]: {
