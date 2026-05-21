@@ -52,7 +52,7 @@ Este documento asegura consistencia en el código y facilita la revisión y mant
 ### Backend
 
 ```
-Api_biosoft/api/src/
+api/src/
 ├── controllers/
 │   ├── auth.controller.js         # Lógica de autenticación
 │   ├── user.controller.js

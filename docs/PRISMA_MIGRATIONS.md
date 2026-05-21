@@ -42,7 +42,7 @@ model Product {
 ### 2. Validar Cambios
 
 ```bash
-cd Api_biosoft/api
+cd api
 
 # Verificar que el esquema sea válido
 npx prisma validate

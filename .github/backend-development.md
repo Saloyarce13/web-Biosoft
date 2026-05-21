@@ -2,7 +2,7 @@
 
 ## Scope
 
-Esta guía se aplica al desarrollo en **Api_biosoft/api/** y proporciona instrucciones detalladas para:
+Esta guía se aplica al desarrollo en **api/** y proporciona instrucciones detalladas para:
 - Implementar nuevas entidades en la BD
 - Crear endpoints API
 - Configurar autenticación y permisos
@@ -146,7 +146,7 @@ model Item {
 ### 2. Migrar BD
 
 ```bash
-cd Api_biosoft/api
+cd api
 npx prisma migrate dev --name add_item_entity
 ```
 

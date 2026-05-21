@@ -7,8 +7,7 @@
 ### Architecture
 
 ```
-Api_biosoft/
-├── api/                    # Express.js + Prisma backend
+api/                        # Express.js + Prisma backend
 │   ├── src/
 │   │   ├── controllers/    # Business logic per entity
 │   │   ├── routes/         # API endpoints
@@ -244,7 +243,7 @@ router.get('/', authenticate, getEntity);
 
 **Terminal 1 - Backend:**
 ```bash
-cd Api_biosoft/api
+cd api
 npm run dev
 # Runs on http://localhost:3000
 ```
@@ -260,7 +259,7 @@ npm run dev
 
 ```bash
 # View database in Prisma Studio
-cd Api_biosoft/api
+cd api
 npx prisma studio
 
 # Create migration after schema changes
