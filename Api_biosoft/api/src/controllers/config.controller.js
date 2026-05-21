@@ -100,7 +100,8 @@ const updateByKey = async (req, res) => {
  */
 const getAppConfig = (req, res) => {
   res.json({
-    apiUrl: process.env.FRONTEND_API_URL || process.env.RENDER_EXTERNAL_URL || '',
+    success: true,
+    apiUrl: process.env.RENDER_EXTERNAL_URL || '',
     appName: 'Bionatural',
   });
 };
